@@ -1,0 +1,17 @@
+# openspec/changes/spanish-panel/change.yaml
+# Spanish Panel - Toda la startup en espanol
+schema: spec-driven
+change: spanish-panel
+status: tasks
+created: 2026-08-03
+author: gentle-orchestrator
+session_preflight:
+  mode: auto
+  artifact_store: openspec
+  delivery_strategy: single-pr-exception
+  review_budget_lines: 2000
+size_exception:
+  approved: true
+  requested_by: user
+  estimated_lines: "1800"
+pr_plan: single-pr

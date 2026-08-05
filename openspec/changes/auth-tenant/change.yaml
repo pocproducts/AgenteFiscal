@@ -1,0 +1,12 @@
+# openspec/changes/auth-tenant/change.yaml
+# Auth + tenant clean architecture — port/adapter for mock-now / Clerk-later
+schema: spec-driven
+change: auth-tenant
+status: proposal
+created: 2026-08-03
+author: gentle-orchestrator
+session_preflight:
+  mode: auto
+  artifact_store: openspec
+  delivery_strategy: ask-on-risk
+  review_budget_lines: 400

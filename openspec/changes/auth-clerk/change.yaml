@@ -1,0 +1,14 @@
+# openspec/changes/auth-clerk/change.yaml
+# Clerk migration for register/login/tenant — first real identity migration
+schema: spec-driven
+change: auth-clerk
+summary: Replace NextAuth v5 with Clerk behind the hexagonal AuthPort (register, login, tenant via Clerk Organizations). Absorbs/supersedes auth-tenant port/adapters/UI work; adds real clerk adapter + session seam + ClerkProvider + prebuilt SignIn/SignUp; drops guest flow; bumps react~19.1.x and next>=16.2.6.
+status: active
+created: 2026-08-04
+updated: 2026-08-04
+author: gentle-orchestrator
+session_preflight:
+  mode: auto
+  artifact_store: openspec
+  delivery_strategy: single-pr-default
+  review_budget_lines: 800

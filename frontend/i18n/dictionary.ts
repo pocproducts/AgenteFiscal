@@ -1,0 +1,1386 @@
+export type Language = "en" | "es";
+
+export type Translations = typeof translations;
+
+export const translations = {
+  en: {
+    nav: {
+      links: {
+        features: "Features",
+        howItWorks: "How it works",
+        developers: "Developers",
+        pricing: "Pricing",
+      },
+      signIn: "Sign in",
+      startCreating: "Start creating",
+      toggleMenu: "Toggle menu",
+    },
+    hero: {
+      eyebrow: "The platform for modern teams",
+      titleLine1: "The platform",
+      titleTo: "to",
+      rotatingWords: ["create", "build", "scale", "ship"],
+      description:
+        "Your toolkit to stop configuring and start innovating. Securely build, deploy, and scale the best experiences.",
+      startTrial: "Start free trial",
+      watchDemo: "Watch demo",
+      stats: [
+        { value: "20 days", label: "saved on builds", company: "NETFLIX" },
+        { value: "98%", label: "faster deployment", company: "STRIPE" },
+        { value: "300%", label: "throughput increase", company: "LINEAR" },
+        { value: "6x", label: "faster to ship", company: "NOTION" },
+      ],
+    },
+    features: {
+      eyebrow: "Capabilities",
+      titleLine1: "Everything you need.",
+      titleLine2: "Nothing you don't.",
+      items: [
+        {
+          title: "Instant Deployment",
+          description:
+            "Push to production in seconds. Our edge network ensures your applications load instantly, anywhere in the world.",
+        },
+        {
+          title: "AI-Native Workflows",
+          description:
+            "Build intelligent applications with built-in AI capabilities. From inference to training, everything scales automatically.",
+        },
+        {
+          title: "Real-time Collaboration",
+          description:
+            "Work together seamlessly. Live preview, instant feedback, and version control that actually makes sense.",
+        },
+        {
+          title: "Enterprise Security",
+          description:
+            "Bank-grade encryption, SOC 2 compliance, and granular access controls. Your data stays yours.",
+        },
+      ],
+    },
+    howItWorks: {
+      eyebrow: "Process",
+      titleLine1: "Three steps.",
+      titleLine2: "Infinite possibilities.",
+      ready: "Ready",
+      fileName: "workflow.ts",
+      steps: [
+        {
+          title: "Connect your tools",
+          description:
+            "Integrate with your existing stack in minutes. We support 200+ data sources out of the box.",
+        },
+        {
+          title: "Build your workflow",
+          description:
+            "Design powerful automations with our visual builder or write code directly.",
+        },
+        {
+          title: "Ship to production",
+          description:
+            "Deploy globally with zero configuration. Your app goes live in under 30 seconds.",
+        },
+      ],
+    },
+    infrastructure: {
+      eyebrow: "Infrastructure",
+      titleLine1: "Global by",
+      titleLine2: "default.",
+      description:
+        "Deploy once, run everywhere. Our edge network spans 17 data centers across 6 continents, delivering sub-50ms latency to 99% of the world.",
+      stats: {
+        dataCenters: "Data centers",
+        uptime: "Uptime SLA",
+        latency: "Global latency",
+      },
+      edgeNetwork: "Edge Network",
+      allOperational: "All operational",
+      regions: {
+        usWest: "US West",
+        usEast: "US East",
+        europe: "Europe",
+        asiaPacific: "Asia Pacific",
+        oceania: "Oceania",
+        southAmerica: "South America",
+      },
+    },
+    metrics: {
+      eyebrow: "Live metrics",
+      titleLine1: "Performance you",
+      titleLine2: "can measure.",
+      live: "Live",
+      items: [
+        "API requests today",
+        "Uptime this quarter",
+        "Average response time",
+        "Countries served",
+      ],
+    },
+    integrations: {
+      eyebrow: "Integrations",
+      titleLine1: "Works with everything",
+      titleLine2: "you already use.",
+      description:
+        "200+ pre-built integrations. Connect your entire stack in minutes.",
+      categories: {
+        versionControl: "Version Control",
+        communication: "Communication",
+        payments: "Payments",
+        database: "Database",
+        cache: "Cache",
+        cloud: "Cloud",
+        hosting: "Hosting",
+        design: "Design",
+        projectManagement: "Project Management",
+        documentation: "Documentation",
+        aiml: "AI/ML",
+      },
+    },
+    security: {
+      eyebrow: "Security",
+      titleLine1: "Trust is",
+      titleLine2: "non-negotiable.",
+      description:
+        "Enterprise-grade security isn't optional. It's built into every layer of our platform, from infrastructure to application.",
+      features: [
+        {
+          title: "SOC 2 Type II",
+          description:
+            "Independently audited security controls with continuous monitoring.",
+        },
+        {
+          title: "End-to-end encryption",
+          description:
+            "AES-256 encryption for data at rest and TLS 1.3 in transit.",
+        },
+        {
+          title: "Zero-trust architecture",
+          description:
+            "Every request is authenticated and authorized. No exceptions.",
+        },
+        {
+          title: "GDPR & HIPAA",
+          description:
+            "Full compliance with data protection and healthcare regulations.",
+        },
+      ],
+    },
+    developers: {
+      eyebrow: "For developers",
+      titleLine1: "Built by devs.",
+      titleLine2: "For devs.",
+      description:
+        "A thoughtfully designed SDK that gets out of your way. Ship faster with intuitive APIs and exceptional documentation.",
+      tabs: {
+        install: "Install",
+        initialize: "Initialize",
+        deploy: "Deploy",
+      },
+      copyCode: "Copy code",
+      readDocs: "Read the docs",
+      viewGitHub: "View on GitHub",
+      features: [
+        {
+          title: "TypeScript native",
+          description: "Full type safety with auto-generated types.",
+        },
+        {
+          title: "Zero config",
+          description: "Sensible defaults that just work.",
+        },
+        {
+          title: "Edge-ready",
+          description: "Runs anywhere: Node, Deno, Bun, browsers.",
+        },
+        {
+          title: "12KB gzipped",
+          description: "Lightweight with zero dependencies.",
+        },
+      ],
+    },
+    testimonials: {
+      label: "What people say",
+      keyResult: "Key Result",
+      trustedBy: "Trusted by forward-thinking teams",
+      items: [
+        {
+          quote:
+            "Optimus transformed our deployment pipeline. What used to take hours now happens in seconds.",
+          role: "CTO",
+          metric: "10x faster deployments",
+        },
+        {
+          quote:
+            "The developer experience is unmatched. Our team's productivity has never been higher.",
+          role: "Engineering Lead",
+          metric: "40% more features shipped",
+        },
+        {
+          quote:
+            "Finally, infrastructure that scales with our ambition. Zero downtime since we switched.",
+          role: "VP Engineering",
+          metric: "99.99% uptime",
+        },
+        {
+          quote:
+            "The integrations are seamless. We connected our entire stack in a single afternoon.",
+          role: "Founder",
+          metric: "50+ integrations used",
+        },
+      ],
+    },
+    pricing: {
+      eyebrow: "Pricing",
+      titleLine1: "Simple, transparent",
+      titleLine2: "pricing",
+      description:
+        "Start free and scale as you grow. No hidden fees, no surprises.",
+      monthly: "Monthly",
+      annual: "Annual",
+      save: "Save 17%",
+      mostPopular: "Most Popular",
+      perMonth: "/month",
+      custom: "Custom",
+      bottomNote:
+        "All plans include automatic updates, HTTPS, and DDoS protection.",
+      compareFeatures: "Compare all features",
+      plans: [
+        {
+          name: "Starter",
+          description: "For individuals and small projects",
+          features: [
+            "Up to 3 projects",
+            "1GB storage",
+            "Community support",
+            "Basic analytics",
+            "SSL certificates",
+          ],
+          cta: "Start free",
+        },
+        {
+          name: "Pro",
+          description: "For growing teams and businesses",
+          features: [
+            "Unlimited projects",
+            "100GB storage",
+            "Priority support",
+            "Advanced analytics",
+            "Custom domains",
+            "Team collaboration",
+            "API access",
+          ],
+          cta: "Start trial",
+        },
+        {
+          name: "Enterprise",
+          description: "For large-scale operations",
+          features: [
+            "Everything in Pro",
+            "Unlimited storage",
+            "24/7 dedicated support",
+            "Custom integrations",
+            "SLA guarantee",
+            "On-premise option",
+            "Security audit",
+            "Custom contracts",
+          ],
+          cta: "Contact sales",
+        },
+      ],
+    },
+    cta: {
+      titleLine1: "Ready to build",
+      titleLine2: "something great?",
+      description:
+        "Join thousands of teams shipping faster with Optimus. Start free, scale infinitely.",
+      startBuilding: "Start building free",
+      talkToSales: "Talk to sales",
+      noCreditCard: "No credit card required",
+    },
+    footer: {
+      description:
+        "The platform for teams who ship. Build, deploy, and scale with unprecedented velocity.",
+      allRights: "2025 Optimus. All rights reserved.",
+      allSystems: "All systems operational",
+      hiring: "Hiring",
+      columns: {
+        Product: "Product",
+        Developers: "Developers",
+        Company: "Company",
+        Legal: "Legal",
+      },
+      links: {
+        features: "Features",
+        howItWorks: "How it works",
+        pricing: "Pricing",
+        integrations: "Integrations",
+        documentation: "Documentation",
+        apiReference: "API Reference",
+        sdk: "SDK",
+        status: "Status",
+        about: "About",
+        blog: "Blog",
+        careers: "Careers",
+        contact: "Contact",
+        privacy: "Privacy",
+        terms: "Terms",
+        security: "Security",
+      },
+    },
+    auth: {
+      back: "Back",
+      poweredBy: "Powered by",
+      signIn: "Sign in",
+      signUp: "Sign up",
+      welcomeTitle: "Welcome back",
+      welcomeSubtitle: "Sign in to your account to continue",
+      createAccountTitle: "Create account",
+      createAccountSubtitle: "Get started for free",
+      noAccount: "No account?",
+      haveAccount: "Have an account?",
+      emailLabel: "Email",
+      emailPlaceholder: "user@acme.com",
+      passwordLabel: "Password",
+      errors: {
+        invalidCredentials: "Invalid credentials!",
+        failedValidation: "Failed validating your submission!",
+        accountExists: "Account already exists!",
+        failedCreateAccount: "Failed to create account!",
+        accountCreated: "Account created!",
+      },
+    },
+    panel: {
+      sidebar: {
+        openSidebar: "Open sidebar",
+        chatbot: "Chatbot",
+        newReport: "Nuevo Informe",
+        agentSessions: "Agent Sessions",
+        analytics: "Analytics",
+        overview: "Overview",
+        llmGateway: "LLM Gateway",
+        settings: "Settings",
+        billing: "Billing",
+        profiles: "Profiles",
+        history: "History",
+        today: "Today",
+        yesterday: "Yesterday",
+        last7Days: "Last 7 days",
+        last30Days: "Last 30 days",
+        older: "Older",
+        loginToSave: "Login to save and revisit previous chats!",
+        emptyHistory:
+          "Your conversations will appear here once you start chatting!",
+        loading: "Loading...",
+        deleteTitle: "Are you absolutely sure?",
+        deleteDescription:
+          "This action cannot be undone. This will permanently delete your chat and remove it from our servers.",
+        cancel: "Cancel",
+        continue: "Continue",
+        chatDeleted: "Chat deleted",
+        more: "More",
+        share: "Share",
+        delete: "Delete",
+        userMenu: {
+          toggleDarkMode: "Toggle dark mode",
+          toggleLightMode: "Toggle light mode",
+          checkingAuth: "Checking authentication status, please try again!",
+          signOut: "Sign out",
+        },
+        agent: {
+          monitor: "Agent Monitor",
+          close: "Close agent sidebar",
+          reload: "Reload",
+          openInNewTab: "Open in new tab",
+          runningTasksDone: "Running — {completed} task{done} done",
+          completedTasks: "Completed — {total} tasks",
+          waitingToStart: "Waiting to start",
+          tasks: "Tasks",
+          time: "Time",
+          cost: "Cost",
+          noSession: "No agent session active",
+          noSessionHint:
+            "Click on an agent button in the chat to inspect it here.",
+          message: "Message",
+          queryCompleted: "Consulta completada",
+          waitingStart: "Esperando inicio...",
+        },
+      },
+      chat: {
+        reasoning: {
+          thinking: "Thinking...",
+          fewSeconds: "Thought for a few seconds",
+          forSeconds: "Thought for {seconds} seconds",
+        },
+        tool: {
+          status: {
+            awaiting: "Awaiting Approval",
+            responded: "Responded",
+            running: "Running",
+            pending: "Pending",
+            completed: "Completed",
+            denied: "Denied",
+            error: "Error",
+          },
+          parameters: "Parameters",
+          result: "Result",
+          error: "Error",
+        },
+        messageActions: {
+          edit: "Edit",
+          copyTooltip: "Copy",
+          noTextToCopy: "There's no text to copy!",
+          copied: "Copied to clipboard!",
+          upvoteTooltip: "Upvote Response",
+          upvotingLoading: "Upvoting Response...",
+          upvoted: "Upvoted Response!",
+          upvoteError: "Failed to upvote response.",
+          downvoteTooltip: "Downvote Response",
+          downvotingLoading: "Downvoting Response...",
+          downvoted: "Downvoted Response!",
+          downvoteError: "Failed to downvote response.",
+        },
+        prompt: {
+          placeholder: "What would you like to know?",
+          uploadFiles: "Upload files",
+          stop: "Stop",
+          submit: "Submit",
+          addPhotos: "Add photos or files",
+          errorNoFiles: "No files match the accepted types.",
+          errorMaxSize: "All files exceed the maximum size.",
+          errorTooMany: "Too many files. Some were not added.",
+        },
+        modelPlaceholder: "Search models...",
+        modelAvailable: "Available",
+        generatingImage: "Generating Image...",
+        document: {
+          creating: "Creating",
+          created: "Created",
+          updating: "Updating",
+          updated: "Updated",
+          addingSuggestions: "Adding suggestions",
+          addedSuggestionsTo: "Added suggestions to",
+          forDocument: "for document",
+          notSupported:
+            "Viewing files in shared chats is currently not supported.",
+          errorCreating: "Error creating document",
+          errorUpdating: "Error updating document",
+          error: "Error",
+        },
+        toolApproval: {
+          weatherDenied: "Weather lookup was denied.",
+          deny: "Deny",
+          allow: "Allow",
+        },
+        shell: {
+          activateTitle: "Activate AI Gateway",
+          activateDescriptionBefore: "This application requires",
+          activateDescriptionOwner: "the owner",
+          activateDescriptionYou: "you",
+          activateDescriptionAfter: "to activate Vercel AI Gateway.",
+          activate: "Activate",
+          cancel: "Cancel",
+        },
+        upload: {
+          failedToUpload: "Failed to upload file, please try again!",
+          failedFiles: "Failed to upload files",
+          failedPasted: "Failed to upload pasted image(s)",
+          pastedImage: "Pasted image",
+        },
+        input: {
+          placeholder: "What would you like to know?",
+          submit: "Submit",
+          stop: "Stop",
+          uploadFiles: "Upload files",
+          addPhotos: "Add photos or files",
+        },
+        profile: {
+          label: "Profile:",
+          selectPlaceholder: "Select profile...",
+          empty: "No profiles — create one in Settings",
+        },
+        branch: {
+          previous: "Previous branch",
+          next: "Next branch",
+          of: "of",
+        },
+        console: {
+          resize: "Resize console",
+        },
+        messages: {
+          scrollToBottom: "Scroll to bottom",
+        },
+        toolbar: {
+          fixError: "Fix error",
+        },
+        artifactActions: {
+          failedToExecute: "Failed to execute action",
+        },
+        versionFooter: {
+          showChanges: "Show changes",
+        },
+        greeting: {
+          title: "Generate a Fiscal Report",
+          subtitle:
+            "Tax details, deadlines, debts, payment plans, tax registry, IIBB Cordoba",
+        },
+        visibilities: {
+          private: {
+            label: "Private",
+            description: "Only you can access this chat",
+          },
+          public: {
+            label: "Public",
+            description: "Anyone with the link can access this chat",
+          },
+        },
+        suggestions: [
+          "What are the advantages of using Next.js?",
+          "Write code to demonstrate Dijkstra's algorithm",
+          "Help me write an essay about Silicon Valley",
+          "What is the weather in San Francisco?",
+        ],
+      },
+      pages: {
+        dashboards: {
+          title: "Agent Sessions",
+          description:
+            "Monitor and audit logs of your active and past agent executions.",
+          goal: "Goal",
+          sessionId: "Session ID",
+          profileId: "Profile ID",
+          startedAt: "Started At",
+          duration: "Duration",
+          cost: "Cost",
+          status: "Status / Last Task",
+          running: "Running...",
+          initializing: "Initializing",
+          statusLabel: "Status:",
+          empty:
+            "No agent sessions captured yet. Execute a fiscal report first to view logs here.",
+        },
+        remoteBrowser: {
+          title: "Remote Browser Sessions",
+          description: "Manage and observe cloud browser instances.",
+          browser: "Browser",
+          cdpUrl: "CDP URL",
+          live: "Live",
+          profileId: "Profile ID",
+          agent: "Agent",
+          region: "Region",
+          startedAt: "Started At",
+          duration: "Duration",
+          cost: "Cost",
+          livestatus: "LIVE",
+          offlinestatus: "OFFLINE",
+          empty: "No remote browser instances active.",
+        },
+        workspaces: {
+          title: "Workspaces",
+          description: "Manage your team and project workspaces.",
+          empty: "Workspaces configuration will go here.",
+        },
+        analytics: {
+          dashboard: {
+            title: "Overview",
+            description: "General analytics and execution metrics.",
+            empty: "Overview charts and metrics will go here.",
+          },
+          llmGateway: {
+            title: "LLM Gateway",
+            description: "Manage and observe your AI model connections.",
+            empty: "LLM Gateway configuration and usage routing will go here.",
+          },
+        },
+        settings: {
+          billing: {
+            title: "Billing",
+            description: "Manage your subscription and payment methods.",
+            usage30: "Usage — Last 30 days",
+            balance: "Balance:",
+            used: "Used:",
+            rechargeTitle: "Credit Recharge",
+            rechargeSubtitle:
+              "Add credits to your account. Credits are consumed per report and AI request.",
+            subscriptionTitle: "Subscription",
+            subscriptionSubtitle: "Choose the plan that best fits your needs.",
+            customPlaceholder: "Custom ($100 – $100,000)",
+            rechargeButton: "Recharge",
+            plans: [
+              {
+                name: "Free",
+                period: "forever",
+                description: "Perfect for getting started",
+                features: [
+                  "5 reports per month",
+                  "Basic AI assistance",
+                  "1 execution profile",
+                  "Community support",
+                ],
+                cta: "Current plan",
+              },
+              {
+                name: "Pro",
+                period: "/month",
+                description: "For power users and small teams",
+                features: [
+                  "Unlimited reports",
+                  "Advanced AI models",
+                  "10 execution profiles",
+                  "Priority support",
+                  "Custom integrations",
+                ],
+                cta: "Upgrade to Pro",
+              },
+              {
+                name: "Enterprise",
+                period: "/month",
+                description: "For organizations with advanced needs",
+                features: [
+                  "Everything in Pro",
+                  "Unlimited profiles",
+                  "Dedicated support",
+                  "SSO & audit logs",
+                  "Custom SLA",
+                  "On-premise deployment",
+                ],
+                cta: "Contact sales",
+              },
+            ],
+          },
+          profiles: {
+            title: "Profiles",
+            description:
+              "Manage execution profiles and cookie sessions for your agents.",
+            totalLabel: "Total profiles:",
+            newProfile: "New Profile",
+            empty: "No profiles yet. Create one to get started.",
+            createFirst: "Create first profile",
+            rename: "Rename",
+            setupAuth: "Setup Auth",
+            delete: "Delete",
+            profileDeleted: "Profile deleted",
+            profileCreated: 'Profile "{name}" created',
+            nameUpdated: "Profile name updated",
+            invalidName: "Please enter a valid name",
+            nameEmpty: "Name cannot be empty",
+            invalidCuit: "Enter a valid 11-digit CUIT",
+            passwordEmpty: "Enter the fiscal password",
+            authSet: "Authentication set for {name}",
+            createDialogTitle: "Create Execution Profile",
+            createDialogDescription:
+              "Configure name and cookie domains for this profile.",
+            profileNameLabel: "Profile Name",
+            profileNamePlaceholder: "e.g. Principal Taxpayer S.A.",
+            cookieDomainsLabel: "Cookie Domains",
+            cancel: "Cancel",
+            create: "Create",
+            renameDialogTitle: "Rename Profile",
+            renameDialogDesc: "Change the display name of this profile.",
+            save: "Save",
+            authDialogTitle: "Setup Authentication",
+            authDialogDesc:
+              "Simulate credential storage for ARCA and Rentas automatic login.",
+            cuitLabel: "Taxpayer CUIT (11 digits)",
+            passwordLabel: "Clave Fiscal / Password",
+            simulating: "Simulating Login...",
+            authenticate: "Authenticate",
+            noDomains: "No domains stored",
+            createdOn: "Created on",
+          },
+        },
+      },
+    },
+  },
+  es: {
+    nav: {
+      links: {
+        features: "Funciones",
+        howItWorks: "Cómo funciona",
+        developers: "Desarrolladores",
+        pricing: "Precios",
+      },
+      signIn: "Iniciar sesión",
+      startCreating: "Empezar a crear",
+      toggleMenu: "Abrir menú",
+    },
+    hero: {
+      eyebrow: "La plataforma para equipos modernos",
+      titleLine1: "La plataforma",
+      titleTo: "para",
+      rotatingWords: ["crear", "construir", "escalar", "lanzar"],
+      description:
+        "Tu kit de herramientas para dejar de configurar y empezar a innovar. Crea, despliega y escala las mejores experiencias de forma segura.",
+      startTrial: "Prueba gratis",
+      watchDemo: "Ver demo",
+      stats: [
+        { value: "20 días", label: "ahorrados en builds", company: "NETFLIX" },
+        { value: "98%", label: "despliegues más rápidos", company: "STRIPE" },
+        { value: "300%", label: "más rendimiento", company: "LINEAR" },
+        { value: "6x", label: "más rápido al lanzar", company: "NOTION" },
+      ],
+    },
+    features: {
+      eyebrow: "Capacidades",
+      titleLine1: "Todo lo que necesitas.",
+      titleLine2: "Nada que no necesites.",
+      items: [
+        {
+          title: "Despliegue instantáneo",
+          description:
+            "Lleva a producción en segundos. Nuestra red de edge garantiza que tus aplicaciones carguen al instante en cualquier parte del mundo.",
+        },
+        {
+          title: "Flujos nativos con IA",
+          description:
+            "Crea aplicaciones inteligentes con capacidades de IA integradas. Desde la inferencia hasta el entrenamiento, todo escala automáticamente.",
+        },
+        {
+          title: "Colaboración en tiempo real",
+          description:
+            "Trabajen juntos sin fricciones. Vista previa en vivo, feedback instantáneo y un control de versiones que de verdad tiene sentido.",
+        },
+        {
+          title: "Seguridad empresarial",
+          description:
+            "Cifrado de nivel bancario, cumplimiento SOC 2 y controles de acceso granulares. Tus datos siguen siendo tuyos.",
+        },
+      ],
+    },
+    howItWorks: {
+      eyebrow: "Proceso",
+      titleLine1: "Tres pasos.",
+      titleLine2: "Posibilidades infinitas.",
+      ready: "Listo",
+      fileName: "workflow.ts",
+      steps: [
+        {
+          title: "Conecta tus herramientas",
+          description:
+            "Intégrate con tu stack actual en minutos. Soportamos más de 200 fuentes de datos de fábrica.",
+        },
+        {
+          title: "Construye tu flujo de trabajo",
+          description:
+            "Diseña automatizaciones potentes con nuestro editor visual o escribe código directamente.",
+        },
+        {
+          title: "Lanza a producción",
+          description:
+            "Despliega globalmente sin configuración. Tu app sale en vivo en menos de 30 segundos.",
+        },
+      ],
+    },
+    infrastructure: {
+      eyebrow: "Infraestructura",
+      titleLine1: "Global por",
+      titleLine2: "defecto.",
+      description:
+        "Despliega una vez, ejecuta en todas partes. Nuestra red de edge abarca 17 centros de datos en 6 continentes, con una latencia menor a 50 ms para el 99% del mundo.",
+      stats: {
+        dataCenters: "Centros de datos",
+        uptime: "SLA de disponibilidad",
+        latency: "Latencia global",
+      },
+      edgeNetwork: "Red de Edge",
+      allOperational: "Todo operativo",
+      regions: {
+        usWest: "EE. UU. Oeste",
+        usEast: "EE. UU. Este",
+        europe: "Europa",
+        asiaPacific: "Asia-Pacífico",
+        oceania: "Oceanía",
+        southAmerica: "Sudamérica",
+      },
+    },
+    metrics: {
+      eyebrow: "Métricas en vivo",
+      titleLine1: "Un rendimiento que",
+      titleLine2: "puedes medir.",
+      live: "En vivo",
+      items: [
+        "Solicitudes a la API hoy",
+        "Disponibilidad este trimestre",
+        "Tiempo medio de respuesta",
+        "Países atendidos",
+      ],
+    },
+    integrations: {
+      eyebrow: "Integraciones",
+      titleLine1: "Funciona con todo",
+      titleLine2: "lo que ya usas.",
+      description:
+        "Más de 200 integraciones predefinidas. Conecta todo tu stack en minutos.",
+      categories: {
+        versionControl: "Control de versiones",
+        communication: "Comunicación",
+        payments: "Pagos",
+        database: "Base de datos",
+        cache: "Caché",
+        cloud: "Nube",
+        hosting: "Hosting",
+        design: "Diseño",
+        projectManagement: "Gestión de proyectos",
+        documentation: "Documentación",
+        aiml: "IA/ML",
+      },
+    },
+    security: {
+      eyebrow: "Seguridad",
+      titleLine1: "La confianza es",
+      titleLine2: "innegociable.",
+      description:
+        "La seguridad de nivel empresarial no es opcional. Está integrada en cada capa de nuestra plataforma, desde la infraestructura hasta la aplicación.",
+      features: [
+        {
+          title: "SOC 2 Type II",
+          description:
+            "Controles de seguridad auditados de forma independiente con monitoreo continuo.",
+        },
+        {
+          title: "Cifrado de extremo a extremo",
+          description:
+            "Cifrado AES-256 para datos en reposo y TLS 1.3 en tránsito.",
+        },
+        {
+          title: "Arquitectura de confianza cero",
+          description:
+            "Cada solicitud se autentica y autoriza. Sin excepciones.",
+        },
+        {
+          title: "GDPR y HIPAA",
+          description:
+            "Cumplimiento total con las normativas de protección de datos y salud.",
+        },
+      ],
+    },
+    developers: {
+      eyebrow: "Para desarrolladores",
+      titleLine1: "Hecho por devs.",
+      titleLine2: "Para devs.",
+      description:
+        "Un SDK diseñado con cuidado que no se interpone en tu camino. Lanza más rápido con APIs intuitivas y documentación excepcional.",
+      tabs: {
+        install: "Instalar",
+        initialize: "Inicializar",
+        deploy: "Desplegar",
+      },
+      copyCode: "Copiar código",
+      readDocs: "Leer la documentación",
+      viewGitHub: "Ver en GitHub",
+      features: [
+        {
+          title: "Nativo de TypeScript",
+          description: "Seguridad de tipos total con tipos autogenerados.",
+        },
+        {
+          title: "Sin configuración",
+          description:
+            "Valores por defecto sensatos que simplemente funcionan.",
+        },
+        {
+          title: "Listo para edge",
+          description:
+            "Funciona en cualquier lugar: Node, Deno, Bun, navegadores.",
+        },
+        {
+          title: "12KB comprimido",
+          description: "Ligero y sin dependencias.",
+        },
+      ],
+    },
+    testimonials: {
+      label: "Lo que dicen",
+      keyResult: "Resultado clave",
+      trustedBy: "Con la confianza de equipos visionarios",
+      items: [
+        {
+          quote:
+            "Optimus transformó nuestro pipeline de despliegue. Lo que antes tomaba horas ahora ocurre en segundos.",
+          role: "CTO",
+          metric: "Despliegues 10x más rápidos",
+        },
+        {
+          quote:
+            "La experiencia de desarrollo no tiene rival. La productividad de nuestro equipo nunca había sido tan alta.",
+          role: "Líder de Ingeniería",
+          metric: "40% más funciones lanzadas",
+        },
+        {
+          quote:
+            "Por fin, una infraestructura que escala con nuestra ambición. Cero caídas desde que cambiamos.",
+          role: "VP de Ingeniería",
+          metric: "99.99% de disponibilidad",
+        },
+        {
+          quote:
+            "Las integraciones son perfectas. Conectamos todo nuestro stack en una sola tarde.",
+          role: "Fundador",
+          metric: "Más de 50 integraciones usadas",
+        },
+      ],
+    },
+    pricing: {
+      eyebrow: "Precios",
+      titleLine1: "Precios simples",
+      titleLine2: "y transparentes",
+      description:
+        "Empieza gratis y escala a medida que creces. Sin tarifas ocultas, sin sorpresas.",
+      monthly: "Mensual",
+      annual: "Anual",
+      save: "Ahorra 17%",
+      mostPopular: "Más popular",
+      perMonth: "/mes",
+      custom: "Personalizado",
+      bottomNote:
+        "Todos los planes incluyen actualizaciones automáticas, HTTPS y protección DDoS.",
+      compareFeatures: "Comparar todas las funciones",
+      plans: [
+        {
+          name: "Starter",
+          description: "Para individuos y proyectos pequeños",
+          features: [
+            "Hasta 3 proyectos",
+            "1GB de almacenamiento",
+            "Soporte de la comunidad",
+            "Analíticas básicas",
+            "Certificados SSL",
+          ],
+          cta: "Empezar gratis",
+        },
+        {
+          name: "Pro",
+          description: "Para equipos y empresas en crecimiento",
+          features: [
+            "Proyectos ilimitados",
+            "100GB de almacenamiento",
+            "Soporte prioritario",
+            "Analíticas avanzadas",
+            "Dominios personalizados",
+            "Colaboración en equipo",
+            "Acceso a la API",
+          ],
+          cta: "Iniciar prueba",
+        },
+        {
+          name: "Enterprise",
+          description: "Para operaciones a gran escala",
+          features: [
+            "Todo lo de Pro",
+            "Almacenamiento ilimitado",
+            "Soporte dedicado 24/7",
+            "Integraciones personalizadas",
+            "Garantía de SLA",
+            "Opción on-premise",
+            "Auditoría de seguridad",
+            "Contratos personalizados",
+          ],
+          cta: "Contactar ventas",
+        },
+      ],
+    },
+    cta: {
+      titleLine1: "¿Listo para construir",
+      titleLine2: "algo increíble?",
+      description:
+        "Únete a miles de equipos que lanzan más rápido con Optimus. Empieza gratis, escala sin límites.",
+      startBuilding: "Construir gratis",
+      talkToSales: "Hablar con ventas",
+      noCreditCard: "No se requiere tarjeta de crédito",
+    },
+    footer: {
+      description:
+        "La plataforma para equipos que lanzan. Crea, despliega y escala con una velocidad sin precedentes.",
+      allRights: "2025 Optimus. Todos los derechos reservados.",
+      allSystems: "Todos los sistemas operativos",
+      hiring: "Contratando",
+      columns: {
+        Product: "Producto",
+        Developers: "Desarrolladores",
+        Company: "Empresa",
+        Legal: "Legal",
+      },
+      links: {
+        features: "Funciones",
+        howItWorks: "Cómo funciona",
+        pricing: "Precios",
+        integrations: "Integraciones",
+        documentation: "Documentación",
+        apiReference: "Referencia de la API",
+        sdk: "SDK",
+        status: "Estado",
+        about: "Acerca de",
+        blog: "Blog",
+        careers: "Empleo",
+        contact: "Contacto",
+        privacy: "Privacidad",
+        terms: "Términos",
+        security: "Seguridad",
+      },
+    },
+    auth: {
+      back: "Volver",
+      poweredBy: "Impulsado por",
+      signIn: "Iniciar sesión",
+      signUp: "Registrarse",
+      welcomeTitle: "Te damos la bienvenida",
+      welcomeSubtitle: "Inicia sesión en tu cuenta para continuar",
+      createAccountTitle: "Crear cuenta",
+      createAccountSubtitle: "Empieza gratis",
+      noAccount: "¿No tienes cuenta?",
+      haveAccount: "¿Ya tienes una cuenta?",
+      emailLabel: "Correo electrónico",
+      emailPlaceholder: "tu@email.com",
+      passwordLabel: "Contraseña",
+      errors: {
+        invalidCredentials: "¡Credenciales inválidas!",
+        failedValidation: "¡No se pudo validar tu envío!",
+        accountExists: "¡La cuenta ya existe!",
+        failedCreateAccount: "¡No se pudo crear la cuenta!",
+        accountCreated: "¡Cuenta creada!",
+      },
+    },
+    panel: {
+      sidebar: {
+        openSidebar: "Abrir barra lateral",
+        chatbot: "Chatbot",
+        newReport: "Nuevo Informe",
+        agentSessions: "Sesiones de agentes",
+        analytics: "Analítica",
+        overview: "Resumen",
+        llmGateway: "LLM Gateway",
+        settings: "Configuración",
+        billing: "Facturación",
+        profiles: "Perfiles",
+        history: "Historial",
+        today: "Hoy",
+        yesterday: "Ayer",
+        last7Days: "Últimos 7 días",
+        last30Days: "Últimos 30 días",
+        older: "Más antiguos",
+        loginToSave:
+          "¡Inicia sesión para guardar y revisar tus chats anteriores!",
+        emptyHistory:
+          "Tus conversaciones aparecerán aquí cuando empieces a chatear",
+        loading: "Cargando...",
+        deleteTitle: "¿Estás absolutamente seguro?",
+        deleteDescription:
+          "Esta acción no se puede deshacer. Se eliminará permanentemente el chat y se quitará de nuestros servidores.",
+        cancel: "Cancelar",
+        continue: "Continuar",
+        chatDeleted: "Chat eliminado",
+        more: "Más",
+        share: "Compartir",
+        delete: "Eliminar",
+        userMenu: {
+          toggleDarkMode: "Cambiar a modo oscuro",
+          toggleLightMode: "Cambiar a modo claro",
+          checkingAuth:
+            "Comprobando estado de autenticación, inténtalo de nuevo",
+          signOut: "Cerrar sesión",
+        },
+        agent: {
+          monitor: "Monitor de agentes",
+          close: "Cerrar barra lateral de agente",
+          reload: "Recargar",
+          openInNewTab: "Abrir en nueva pestaña",
+          runningTasksDone: "Ejecutando — {completed} tarea{done} completada",
+          completedTasks: "Completado — {total} tareas",
+          waitingToStart: "Esperando para comenzar",
+          tasks: "Tareas",
+          time: "Tiempo",
+          cost: "Costo",
+          noSession: "No hay sesión de agente activa",
+          noSessionHint:
+            "Haz clic en un botón de agente del chat para inspeccionarlo aquí.",
+          message: "Mensaje",
+          queryCompleted: "Consulta completada",
+          waitingStart: "Esperando inicio...",
+        },
+      },
+      chat: {
+        reasoning: {
+          thinking: "Pensando…",
+          fewSeconds: "Pensó durante unos segundos",
+          forSeconds: "Pensó por {seconds} segundos",
+        },
+        tool: {
+          status: {
+            awaiting: "Esperando aprobación",
+            responded: "Respondido",
+            running: "Ejecutando",
+            pending: "Pendiente",
+            completed: "Completado",
+            denied: "Denegado",
+            error: "Error",
+          },
+          parameters: "Parámetros",
+          result: "Resultado",
+          error: "Error",
+        },
+        messageActions: {
+          edit: "Editar",
+          copyTooltip: "Copiar",
+          noTextToCopy: "¡No hay texto para copiar!",
+          copied: "¡Copiado al portapapeles!",
+          upvoteTooltip: "Votar a favor",
+          upvotingLoading: "Votando a favor...",
+          upvoted: "¡Respuesta votada a favor!",
+          upvoteError: "No se pudo votar a favor de la respuesta.",
+          downvoteTooltip: "Votar en contra",
+          downvotingLoading: "Votando en contra...",
+          downvoted: "¡Respuesta votada en contra!",
+          downvoteError: "No se pudo votar en contra de la respuesta.",
+        },
+        prompt: {
+          placeholder: "¿Qué te gustaría saber?",
+          uploadFiles: "Subir archivos",
+          stop: "Detener",
+          submit: "Enviar",
+          addPhotos: "Añadir fotos o archivos",
+          errorNoFiles: "Ningún archivo coincide con los tipos aceptados.",
+          errorMaxSize: "Todos los archivos superan el tamaño máximo.",
+          errorTooMany: "Demasiados archivos. No se agregaron algunos.",
+        },
+        modelPlaceholder: "Buscar modelos...",
+        modelAvailable: "Disponibles",
+        generatingImage: "Generando imagen...",
+        document: {
+          creating: "Creando",
+          created: "Creado",
+          updating: "Actualizando",
+          updated: "Actualizado",
+          addingSuggestions: "Añadiendo sugerencias",
+          addedSuggestionsTo: "Sugerencias añadidas a",
+          forDocument: "para el documento",
+          notSupported:
+            "Ver archivos en chats compartidos no está disponible por ahora.",
+          errorCreating: "Error al crear el documento",
+          errorUpdating: "Error al actualizar el documento",
+          error: "Error",
+        },
+        toolApproval: {
+          weatherDenied: "La consulta del clima fue denegada.",
+          deny: "Denegar",
+          allow: "Permitir",
+        },
+        shell: {
+          activateTitle: "Activar AI Gateway",
+          activateDescriptionBefore: "Esta aplicación requiere que",
+          activateDescriptionOwner: "el propietario",
+          activateDescriptionYou: "tú",
+          activateDescriptionAfter: "actives Vercel AI Gateway.",
+          activate: "Activar",
+          cancel: "Cancelar",
+        },
+        upload: {
+          failedToUpload: "No se pudo subir el archivo, inténtalo de nuevo",
+          failedFiles: "No se pudieron subir los archivos",
+          failedPasted: "No se pudo subir la(s) imagen(es) pegada(s)",
+          pastedImage: "Imagen pegada",
+        },
+        input: {
+          placeholder: "¿Qué te gustaría saber?",
+          submit: "Enviar",
+          stop: "Detener",
+          uploadFiles: "Subir archivos",
+          addPhotos: "Añadir fotos o archivos",
+        },
+        profile: {
+          label: "Perfil:",
+          selectPlaceholder: "Seleccionar perfil...",
+          empty: "Sin perfiles — crea uno en Configuración",
+        },
+        branch: {
+          previous: "Rama anterior",
+          next: "Rama siguiente",
+          of: "de",
+        },
+        console: {
+          resize: "Redimensionar consola",
+        },
+        messages: {
+          scrollToBottom: "Ir al final",
+        },
+        toolbar: {
+          fixError: "Corregir error",
+        },
+        artifactActions: {
+          failedToExecute: "No se pudo ejecutar la acción",
+        },
+        versionFooter: {
+          showChanges: "Mostrar cambios",
+        },
+        greeting: {
+          title: "Genera un Reporte Fiscal",
+          subtitle:
+            "Detalles de impuestos, vencimientos, deudas, planes de pago, registro tributario, IIBB Córdoba",
+        },
+        visibilities: {
+          private: {
+            label: "Privado",
+            description: "Solo tú puedes acceder a este chat",
+          },
+          public: {
+            label: "Público",
+            description: "Cualquiera con el enlace puede acceder a este chat",
+          },
+        },
+        suggestions: [
+          "¿Cuáles son las ventajas de usar Next.js?",
+          "Escribe código para demostrar el algoritmo de Dijkstra",
+          "Ayúdame a escribir un ensayo sobre Silicon Valley",
+          "¿Qué tiempo hace en San Francisco?",
+        ],
+      },
+      pages: {
+        dashboards: {
+          title: "Sesiones de agentes",
+          description:
+            "Monitorea y audita los registros de tus ejecuciones de agentes activas y pasadas.",
+          goal: "Objetivo",
+          sessionId: "ID de sesión",
+          profileId: "ID de perfil",
+          startedAt: "Comenzó",
+          duration: "Duración",
+          cost: "Costo",
+          status: "Estado / Última tarea",
+          running: "Ejecutando...",
+          initializing: "Inicializando",
+          statusLabel: "Estado:",
+          empty:
+            "Aún no hay sesiones de agentes capturadas. Ejecuta un reporte fiscal primero para ver los registros aquí.",
+        },
+        remoteBrowser: {
+          title: "Sesiones de navegador remoto",
+          description: "Gestiona y observa instancias de navegador en la nube.",
+          browser: "Navegador",
+          cdpUrl: "URL CDP",
+          live: "En vivo",
+          profileId: "ID de perfil",
+          agent: "Agente",
+          region: "Región",
+          startedAt: "Comenzó",
+          duration: "Duración",
+          cost: "Costo",
+          livestatus: "EN VIVO",
+          offlinestatus: "DESCONECTADO",
+          empty: "No hay instancias de navegador remoto activas.",
+        },
+        workspaces: {
+          title: "Espacios de trabajo",
+          description: "Gestiona los espacios de trabajo de tu equipo y proyecto.",
+          empty: "La configuración de espacios de trabajo irá aquí.",
+        },
+        analytics: {
+          dashboard: {
+            title: "Resumen",
+            description: "Analítica general y métricas de ejecución.",
+            empty: "Los gráficos y métricas del resumen irán aquí.",
+          },
+          llmGateway: {
+            title: "LLM Gateway",
+            description: "Gestiona y observa tus conexiones de modelos de IA.",
+            empty: "La configuración y el ruteo de uso de LLM Gateway irán aquí.",
+          },
+        },
+        settings: {
+          billing: {
+            title: "Facturación",
+            description: "Gestiona tu suscripción y métodos de pago.",
+            usage30: "Uso — últimos 30 días",
+            balance: "Saldo:",
+            used: "Usado:",
+            rechargeTitle: "Recarga de créditos",
+            rechargeSubtitle:
+              "Agrega créditos a tu cuenta. Los créditos se consumen por reporte y solicitud de IA.",
+            subscriptionTitle: "Suscripción",
+            subscriptionSubtitle: "Elige el plan que mejor se ajuste a tus necesidades.",
+            customPlaceholder: "Personalizado ($100 – $100.000)",
+            rechargeButton: "Recargar",
+            plans: [
+              {
+                name: "Free",
+                period: "para siempre",
+                description: "Perfecto para empezar",
+                features: [
+                  "5 reportes por mes",
+                  "Asistencia de IA básica",
+                  "1 perfil de ejecución",
+                  "Soporte de la comunidad",
+                ],
+                cta: "Plan actual",
+              },
+              {
+                name: "Pro",
+                period: "/mes",
+                description: "Para usuarios avanzados y equipos pequeños",
+                features: [
+                  "Reportes ilimitados",
+                  "Modelos de IA avanzados",
+                  "10 perfiles de ejecución",
+                  "Soporte prioritario",
+                  "Integraciones personalizadas",
+                ],
+                cta: "Actualizar a Pro",
+              },
+              {
+                name: "Enterprise",
+                period: "/mes",
+                description: "Para organizaciones con necesidades avanzadas",
+                features: [
+                  "Todo en Pro",
+                  "Perfiles ilimitados",
+                  "Soporte dedicado",
+                  "SSO y registros de auditoría",
+                  "SLA personalizado",
+                  "Despliegue on-premise",
+                ],
+                cta: "Contactar ventas",
+              },
+            ],
+          },
+          profiles: {
+            title: "Perfiles",
+            description:
+              "Gestiona los perfiles de ejecución y las sesiones de cookies de tus agentes.",
+            totalLabel: "Total de perfiles:",
+            newProfile: "Nuevo perfil",
+            empty: "Aún no hay perfiles. Crea uno para empezar.",
+            createFirst: "Crear primer perfil",
+            rename: "Renombrar",
+            setupAuth: "Configurar autenticación",
+            delete: "Eliminar",
+            profileDeleted: "Perfil eliminado",
+            profileCreated: 'Perfil "{name}" creado',
+            nameUpdated: "Nombre de perfil actualizado",
+            invalidName: "Ingresa un nombre válido",
+            nameEmpty: "El nombre no puede estar vacío",
+            invalidCuit: "Ingresa un CUIT válido de 11 dígitos",
+            passwordEmpty: "Ingresa la clave fiscal",
+            authSet: "Autenticación configurada para {name}",
+            createDialogTitle: "Crear perfil de ejecución",
+            createDialogDescription:
+              "Configura el nombre y los dominios de cookies para este perfil.",
+            profileNameLabel: "Nombre del perfil",
+            profileNamePlaceholder: "p. ej. Contribuyente Principal S.A.",
+            cookieDomainsLabel: "Dominios de cookies",
+            cancel: "Cancelar",
+            create: "Crear",
+            renameDialogTitle: "Renombrar perfil",
+            renameDialogDesc: "Cambia el nombre visible de este perfil.",
+            save: "Guardar",
+            authDialogTitle: "Configurar autenticación",
+            authDialogDesc:
+              "Simula el almacenamiento de credenciales para el inicio de sesión automático en ARCA y Rentas.",
+            cuitLabel: "CUIT del contribuyente (11 dígitos)",
+            passwordLabel: "Clave Fiscal / Contraseña",
+            simulating: "Simulando inicio de sesión...",
+            authenticate: "Autenticar",
+            noDomains: "Sin dominios almacenados",
+            createdOn: "Creado el",
+          },
+        },
+      },
+    },
+  },
+} as const;
