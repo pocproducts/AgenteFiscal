@@ -3,8 +3,9 @@
 import { BarChart3 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { RangeSwitcher } from "@/components/analytics/range-switcher";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useVolume } from "@/hooks/use-volume";
 import type { AgentSession } from "@/lib/ai/tools/agent-execution";
-import { buildVolumeSeries } from "@/lib/dashboard/derive";
 import type { DashboardRange } from "@/lib/dashboard/types";
 import { cn } from "@/lib/utils";
 
@@ -21,23 +22,23 @@ type Mode = "volume" | "spend";
 export function VolumeChart({
   sessions,
   dict,
+  isLoading = false,
 }: {
   sessions: AgentSession[];
   dict: VolumeChartDict;
+  isLoading?: boolean;
 }) {
   const [range, setRange] = useState<DashboardRange>("7d");
   const [mode, setMode] = useState<Mode>("volume");
 
-  const points = useMemo(
-    () => buildVolumeSeries(sessions, range),
-    [sessions, range]
-  );
+  const { data } = useVolume(range);
+  const points = useMemo(() => data ?? [], [data]);
 
   const values = points.map((p) =>
     mode === "volume" ? p.volume : p.spendCents / 100
   );
   const maxValue = Math.max(...values, mode === "volume" ? 5 : 1);
-  const isEmpty = values.every((v) => v === 0);
+  const isEmpty = sessions.length === 0 || values.every((v) => v === 0);
 
   const rangeOptions = [
     { key: "1d", label: dict.ranges.d1 },
@@ -107,78 +108,92 @@ export function VolumeChart({
         />
       </div>
 
-      <div className="relative mt-5">
-        {isEmpty ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-            <p className="text-sm font-medium text-foreground">
-              {dict.emptyTitle}
-            </p>
-            <p className="max-w-xs text-xs text-muted-foreground">
-              {dict.emptyDescription}
-            </p>
+      {isLoading ? (
+        <div className="mt-5 flex flex-col gap-4">
+          <Skeleton className="h-40 w-full" />
+          <div className="flex justify-between">
+            <Skeleton className="h-3 w-10" />
+            <Skeleton className="h-3 w-10" />
+            <Skeleton className="h-3 w-10" />
+            <Skeleton className="h-3 w-10" />
           </div>
-        ) : (
-          <>
-            <div className="absolute inset-y-0 left-0 flex flex-col justify-between py-[8px] text-[10px] text-muted-foreground/60">
-              {[...yTicks].reverse().map((tick) => (
-                <span key={tick}>{Math.round(tick)}</span>
-              ))}
+        </div>
+      ) : (
+        <div className="relative mt-5">
+          {isEmpty ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+              <p className="text-sm font-medium text-foreground">
+                {dict.emptyTitle}
+              </p>
+              <p className="max-w-xs text-xs text-muted-foreground">
+                {dict.emptyDescription}
+              </p>
             </div>
-            <div className="ml-7">
-              <svg
-                className="h-auto w-full"
-                preserveAspectRatio="none"
-                style={{ height: H }}
-                viewBox={`0 0 ${W} ${H}`}
-              >
-                {yTicks.map((tick) => {
-                  const y = PAD.top + chartH - (tick / maxValue) * chartH;
-                  return (
-                    <line
-                      className="stroke-border/20"
-                      key={tick}
-                      strokeDasharray="3 3"
-                      strokeWidth="1"
-                      x1={PAD.left}
-                      x2={W - PAD.right}
-                      y1={y}
-                      y2={y}
-                    />
-                  );
-                })}
-                <path className="fill-primary/10" d={areaPath} />
-                <path
-                  className="stroke-primary"
-                  d={linePath}
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                />
-                {coords.map((c) => (
-                  <circle
-                    className="fill-background stroke-primary stroke-2"
-                    cx={c.x}
-                    cy={c.y}
-                    key={c.timestamp}
-                    r="3"
-                  />
-                ))}
-              </svg>
-              <div className="mt-1 flex justify-between">
-                {points.map((p, i) => (
-                  <span
-                    className="text-[10px] text-muted-foreground/60"
-                    key={p.timestamp}
-                  >
-                    {i % Math.ceil(points.length / 8 || 1) === 0 ? p.label : ""}
-                  </span>
+          ) : (
+            <>
+              <div className="absolute inset-y-0 left-0 flex flex-col justify-between py-[8px] text-[10px] text-muted-foreground/60">
+                {[...yTicks].reverse().map((tick) => (
+                  <span key={tick}>{Math.round(tick)}</span>
                 ))}
               </div>
-            </div>
-          </>
-        )}
-      </div>
+              <div className="ml-7">
+                <svg
+                  className="h-auto w-full"
+                  preserveAspectRatio="none"
+                  style={{ height: H }}
+                  viewBox={`0 0 ${W} ${H}`}
+                >
+                  {yTicks.map((tick) => {
+                    const y = PAD.top + chartH - (tick / maxValue) * chartH;
+                    return (
+                      <line
+                        className="stroke-border/20"
+                        key={tick}
+                        strokeDasharray="3 3"
+                        strokeWidth="1"
+                        x1={PAD.left}
+                        x2={W - PAD.right}
+                        y1={y}
+                        y2={y}
+                      />
+                    );
+                  })}
+                  <path className="fill-primary/10" d={areaPath} />
+                  <path
+                    className="stroke-primary"
+                    d={linePath}
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                  />
+                  {coords.map((c) => (
+                    <circle
+                      className="fill-background stroke-primary stroke-2"
+                      cx={c.x}
+                      cy={c.y}
+                      key={c.timestamp}
+                      r="3"
+                    />
+                  ))}
+                </svg>
+                <div className="mt-1 flex justify-between">
+                  {points.map((p, i) => (
+                    <span
+                      className="text-[10px] text-muted-foreground/60"
+                      key={p.timestamp}
+                    >
+                      {i % Math.ceil(points.length / 8 || 1) === 0
+                        ? p.label
+                        : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
