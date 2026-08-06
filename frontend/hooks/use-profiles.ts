@@ -59,8 +59,8 @@ export function useProfiles() {
   );
 
   const setProfileAuth = useCallback(
-    (id: string, isAuthenticated: boolean) => {
-      setProfiles((prev) => {
+    async (id: string, isAuthenticated: boolean) => {
+      await setProfiles((prev) => {
         const current = prev ?? [];
         return current.map((p) =>
           p.id === id ? { ...p, isAuthenticated } : p

@@ -73,7 +73,7 @@ export default function ProfilesSettingsPage() {
     setIsEditOpen(false);
   };
 
-  const handleSetupAuth = (e: React.FormEvent) => {
+  const handleSetupAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cuitInput.length !== 11) {
       toast.error(dict.invalidCuit);
@@ -84,16 +84,14 @@ export default function ProfilesSettingsPage() {
       return;
     }
     setIsAuthenticating(true);
-    setTimeout(() => {
-      if (authProfile) {
-        setProfileAuth(authProfile.id, true);
-        toast.success(dict.authSet.replace("{name}", authProfile.name));
-      }
-      setIsAuthenticating(false);
-      setIsAuthOpen(false);
-      setCuitInput("");
-      setPasswordInput("");
-    }, 1500);
+    if (authProfile) {
+      await setProfileAuth(authProfile.id, true);
+      toast.success(dict.authSet.replace("{name}", authProfile.name));
+    }
+    setIsAuthenticating(false);
+    setIsAuthOpen(false);
+    setCuitInput("");
+    setPasswordInput("");
   };
 
   const toggleDomain = (domain: string) => {
@@ -157,9 +155,7 @@ export default function ProfilesSettingsPage() {
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/50">
               <Users className="h-7 w-7 text-muted-foreground/40" />
             </div>
-            <p className="text-muted-foreground text-sm">
-              {dict.empty}
-            </p>
+            <p className="text-muted-foreground text-sm">{dict.empty}</p>
             <Button
               className="rounded-xl mt-1"
               onClick={() => setIsCreateOpen(true)}
@@ -343,9 +339,7 @@ export default function ProfilesSettingsPage() {
           <form onSubmit={handleEditProfile}>
             <DialogHeader>
               <DialogTitle>{dict.renameDialogTitle}</DialogTitle>
-              <DialogDescription>
-                {dict.renameDialogDesc}
-              </DialogDescription>
+              <DialogDescription>{dict.renameDialogDesc}</DialogDescription>
             </DialogHeader>
             <div className="py-4">
               <Input
@@ -380,9 +374,7 @@ export default function ProfilesSettingsPage() {
               <DialogTitle className="flex items-center gap-2">
                 <Key className="h-5 w-5 text-primary" /> {dict.authDialogTitle}
               </DialogTitle>
-              <DialogDescription>
-                {dict.authDialogDesc}
-              </DialogDescription>
+              <DialogDescription>{dict.authDialogDesc}</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="space-y-1.5">
