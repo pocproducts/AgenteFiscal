@@ -21,7 +21,7 @@ type Dict = ReturnType<typeof useLanguage>["t"]["panel"]["pages"]["settings"];
 
 const RECHARGE_AMOUNTS = [10, 30, 50, 100, 150, 300];
 
-// ─── Usage data contract (replaces the deleted USAGE_DATA fixture) ───
+// ─── Usage data contract (the old inline usage fixture was removed) ───
 // The chart sources empty data until a real usage endpoint exists; the
 // empty/loading states below are the wiring points for that fetcher.
 type UsageWeek = {
