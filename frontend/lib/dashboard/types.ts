@@ -1,4 +1,4 @@
-import type { AgentSessionSnapshot } from "@/lib/ai/tools/agent-execution";
+import type { AgentSession } from "@/lib/ai/tools/agent-execution";
 
 export type DashboardRange = "1d" | "7d" | "30d";
 
@@ -20,5 +20,5 @@ export interface VolumePoint {
 export interface DashboardHomeSnapshot {
   kpis: DashboardKpis;
   volume: VolumePoint[];
-  recent: AgentSessionSnapshot[];
+  recent: AgentSession[];
 }

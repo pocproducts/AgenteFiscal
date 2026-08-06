@@ -353,7 +353,9 @@ export const translations = {
       sidebar: {
         openSidebar: "Open sidebar",
         chatbot: "Chatbot",
-        newReport: "Nuevo Informe",
+        home: "Home",
+        agents: "Agents",
+        newAgent: "New Agent",
         agentSessions: "Agent Sessions",
         analytics: "Analytics",
         overview: "Overview",
@@ -404,6 +406,25 @@ export const translations = {
           queryCompleted: "Consulta completada",
           waitingStart: "Esperando inicio...",
         },
+      },
+      agentLaunch: {
+        cuitLabel: "Taxpayer CUIT",
+        cuitPlaceholder: "20123456789",
+        cuitInvalid: "CUIT must be 11 digits",
+        cuitHint: "Enter the CUIT, then pick a fiscal tool to run",
+        launching: "Starting a new chat with this agent…",
+        planTitle: "Execution plan",
+        planHint: "The following actions will run",
+        run: "Run",
+        cancel: "Cancel",
+      },
+      billingWidgets: {
+        tokensLabel: "Tokens",
+        tokensHoverTitle: "Token balance",
+        tokensHoverDescription:
+          "Tokens available across your organization for agent runs and chat.",
+        planLabel: "Plan",
+        planHoverCta: "Manage billing",
       },
       chat: {
         reasoning: {
@@ -541,6 +562,32 @@ export const translations = {
         ],
       },
       pages: {
+        home: {
+          kpis: {
+            agentRuns: "Agent runs",
+            browserSessions: "Browser sessions",
+            totalSpend: "Total spend",
+          },
+          volume: {
+            volumeLabel: "Volume",
+            spendLabel: "Spend",
+            emptyTitle: "Nothing has run yet",
+            emptyDescription: "Your first run shows up here within seconds.",
+            ranges: { d1: "1d", d7: "7d", d30: "30d" },
+          },
+          recentActivity: {
+            title: "Recent activity",
+            viewAll: "View all",
+            status: "Status",
+            id: "ID",
+            type: "Type",
+            task: "Task",
+            started: "Started",
+            duration: "Duration",
+            empty: "No activity yet.",
+            running: "Running...",
+          },
+        },
         dashboards: {
           title: "Agent Sessions",
           description:
@@ -590,12 +637,129 @@ export const translations = {
             description: "Manage and observe your AI model connections.",
             empty: "LLM Gateway configuration and usage routing will go here.",
           },
+          overviewUi: {
+            title: "Overview",
+            subtitle: "Platform Analytics",
+            consumption: {
+              title: "Consumption by Category",
+              totalUsed: "Total Used ($)",
+              agentSteps: "Agent Steps (Pasos de Agente)",
+              proxy: "Proxy Traffic (Proxy Data)",
+              vdi: "VDI Sessions & Remote Browsers",
+              chartTitle: "Daily consumption by category",
+              legendAgent: "Agent Steps",
+              legendProxy: "Proxy Data",
+              legendVdi: "VDI Sessions",
+              legendBrowser: "Remote Browsers",
+            },
+            sessions: {
+              title: "Sessions",
+              total: "Total Sessions",
+              withoutTasks: "Without Tasks",
+              avgTasks: "Avg Tasks/Session",
+              avgDuration: "Avg Duration",
+              freeTier: "Free Tier",
+              chartTitle: "Sessions per day",
+              withTasks: "With Tasks",
+            },
+            tasks: {
+              title: "Tasks",
+              success: "Successful",
+              failed: "Failed",
+              manual: "Manually Stopped",
+              successRate: "Success Rate",
+              chartTitle: "Daily success rate",
+            },
+            browsers: {
+              title: "Browsers",
+              chartTitle: "Concurrent Chromium",
+              concurrent: "Concurrent",
+              peak: "Peak browsers",
+            },
+            empty: {
+              title: "No consumption in this period",
+              recommendation:
+                "Expand the date range or run new reports to start seeing metrics.",
+            },
+            ranges: {
+              h24: "24 hours",
+              h7d: "7 days",
+              h30d: "30 days",
+              h90d: "90 days",
+            },
+          },
+          llmGatewayUi: {
+            status: {
+              online: "LLM SYSTEM: ONLINE",
+            },
+            kpis: {
+              requests: "Requests",
+              tokens: "Tokens Used",
+              tokensCache: "Cached Tokens",
+              peakTpm: "Peak TPM",
+              cost: "Accumulated Cost",
+            },
+            charts: {
+              tokens: "Tokens over time",
+              requests: "Requests over time",
+              cost: "Cost over time",
+              peakTpm: "Peak TPM over time",
+            },
+            byModel: {
+              title: "Usage by Model",
+              model: "Model",
+              provider: "Provider",
+              requests: "Requests",
+              latency: "Avg Latency (ms)",
+              tokensInOut: "Tokens In/Out",
+              cost: "Cost ($)",
+            },
+            byok: {
+              title: "Bring Your Own Key (BYOK)",
+              subtitle: "Connect your own AI provider keys.",
+              encryptedVault: "Encrypted in Vault",
+              notConfigured: "Not configured",
+              configure: "Configure",
+              manage: "Manage",
+              keyLabel: "API Key",
+              keyPlaceholder: "sk-••••••••••••••••",
+              vaultNote:
+                "Keys are encrypted and stored securely in Vault. They are never exposed in the browser.",
+              save: "Save",
+              cancel: "Cancel",
+              saved: "Key saved",
+            },
+            empty: {
+              title: "No consumption in this period",
+              recommendation:
+                "Send requests through the gateway to start seeing metrics.",
+            },
+            ranges: {
+              h24: "24 hours",
+              h7d: "7 days",
+              h30d: "30 days",
+              h90d: "90 days",
+              custom: "Custom",
+            },
+            custom: {
+              from: "From",
+              to: "To",
+              apply: "Apply",
+            },
+            routing: {
+              title: "Routing & Failover",
+              failover:
+                "Automatic failover when the primary provider is overloaded or unavailable.",
+            },
+          },
         },
         settings: {
           billing: {
             title: "Billing",
             description: "Manage your subscription and payment methods.",
             usage30: "Usage — Last 30 days",
+            loadingUsage: "Loading usage...",
+            emptyUsage: "No usage in this period yet.",
             balance: "Balance:",
             used: "Used:",
             rechargeTitle: "Credit Recharge",
@@ -603,6 +767,7 @@ export const translations = {
               "Add credits to your account. Credits are consumed per report and AI request.",
             subscriptionTitle: "Subscription",
             subscriptionSubtitle: "Choose the plan that best fits your needs.",
+            currentPlanLabel: "Current plan",
             customPlaceholder: "Custom ($100 – $100,000)",
             rechargeButton: "Recharge",
             plans: [
@@ -1043,7 +1208,9 @@ export const translations = {
       sidebar: {
         openSidebar: "Abrir barra lateral",
         chatbot: "Chatbot",
-        newReport: "Nuevo Informe",
+        home: "Inicio",
+        agents: "Agentes",
+        newAgent: "Nuevo Agente",
         agentSessions: "Sesiones de agentes",
         analytics: "Analítica",
         overview: "Resumen",
@@ -1096,6 +1263,26 @@ export const translations = {
           queryCompleted: "Consulta completada",
           waitingStart: "Esperando inicio...",
         },
+      },
+      agentLaunch: {
+        cuitLabel: "CUIT del contribuyente",
+        cuitPlaceholder: "20123456789",
+        cuitInvalid: "El CUIT debe tener 11 dígitos",
+        cuitHint:
+          "Ingresá el CUIT y elegí una herramienta fiscal para ejecutar",
+        launching: "Iniciando un chat nuevo con este agente…",
+        planTitle: "Plan de ejecución",
+        planHint: "Se van a ejecutar las siguientes acciones",
+        run: "Ejecutar",
+        cancel: "Cancelar",
+      },
+      billingWidgets: {
+        tokensLabel: "Tokens",
+        tokensHoverTitle: "Balance de tokens",
+        tokensHoverDescription:
+          "Tokens disponibles en tu organización para ejecutar agentes y chatear.",
+        planLabel: "Plan",
+        planHoverCta: "Gestionar facturación",
       },
       chat: {
         reasoning: {
@@ -1233,6 +1420,33 @@ export const translations = {
         ],
       },
       pages: {
+        home: {
+          kpis: {
+            agentRuns: "Ejecuciones de agentes",
+            browserSessions: "Sesiones de navegador",
+            totalSpend: "Gasto total",
+          },
+          volume: {
+            volumeLabel: "Volumen",
+            spendLabel: "Gasto",
+            emptyTitle: "Todavía no se ejecutó nada",
+            emptyDescription:
+              "Tu primera ejecución va a aparecer acá en segundos.",
+            ranges: { d1: "1d", d7: "7d", d30: "30d" },
+          },
+          recentActivity: {
+            title: "Actividad reciente",
+            viewAll: "Ver todo",
+            status: "Estado",
+            id: "ID",
+            type: "Tipo",
+            task: "Tarea",
+            started: "Inicio",
+            duration: "Duración",
+            empty: "Todavía no hay actividad.",
+            running: "Ejecutando...",
+          },
+        },
         dashboards: {
           title: "Sesiones de agentes",
           description:
@@ -1268,7 +1482,8 @@ export const translations = {
         },
         workspaces: {
           title: "Espacios de trabajo",
-          description: "Gestiona los espacios de trabajo de tu equipo y proyecto.",
+          description:
+            "Gestiona los espacios de trabajo de tu equipo y proyecto.",
           empty: "La configuración de espacios de trabajo irá aquí.",
         },
         analytics: {
@@ -1280,7 +1495,123 @@ export const translations = {
           llmGateway: {
             title: "LLM Gateway",
             description: "Gestiona y observa tus conexiones de modelos de IA.",
-            empty: "La configuración y el ruteo de uso de LLM Gateway irán aquí.",
+            empty:
+              "La configuración y el ruteo de uso de LLM Gateway irán aquí.",
+          },
+          overviewUi: {
+            title: "Vista General",
+            subtitle: "Analítica de Plataforma",
+            consumption: {
+              title: "Consumo por Categoría",
+              totalUsed: "Total Usado ($)",
+              agentSteps: "Pasos de Agente (Agent Steps)",
+              proxy: "Tráfico de Proxy (Proxy Data)",
+              vdi: "Sesiones VDI & Navegadores Remotos",
+              chartTitle: "Consumo diario por categoría",
+              legendAgent: "Pasos de Agente",
+              legendProxy: "Proxy",
+              legendVdi: "VDI",
+              legendBrowser: "Navegador",
+            },
+            sessions: {
+              title: "Sesiones",
+              total: "Sesiones Totales",
+              withoutTasks: "Sin Tareas",
+              avgTasks: "Promedio Tareas/Sesión",
+              avgDuration: "Duración Promedio",
+              freeTier: "Capa Gratuita",
+              chartTitle: "Sesiones por día",
+              withTasks: "Con Tareas",
+            },
+            tasks: {
+              title: "Tareas",
+              success: "Exitosas",
+              failed: "Fallidas",
+              manual: "Detenidas Manualmente",
+              successRate: "Tasa de Éxito",
+              chartTitle: "Tasa de éxito diaria",
+            },
+            browsers: {
+              title: "Navegadores",
+              chartTitle: "Chromium concurrentes",
+              concurrent: "Concurrentes",
+              peak: "Pico de navegadores",
+            },
+            empty: {
+              title: "Sin consumo en este período",
+              recommendation:
+                "Amplía el rango de fechas o ejecuta nuevos reportes para comenzar a visualizar métricas.",
+            },
+            ranges: {
+              h24: "24 horas",
+              h7d: "7 días",
+              h30d: "30 días",
+              h90d: "90 días",
+            },
+          },
+          llmGatewayUi: {
+            status: {
+              online: "SISTEMA LLM: ONLINE",
+            },
+            kpis: {
+              requests: "Solicitudes",
+              tokens: "Tokens Usados",
+              tokensCache: "Tokens en Cache",
+              peakTpm: "Pico TPM",
+              cost: "Costo Acumulado",
+            },
+            charts: {
+              tokens: "Tokens en el tiempo",
+              requests: "Solicitudes en el tiempo",
+              cost: "Costo en el tiempo",
+              peakTpm: "Pico TPM en el tiempo",
+            },
+            byModel: {
+              title: "Uso por Modelo",
+              model: "Modelo",
+              provider: "Proveedor",
+              requests: "Solicitudes",
+              latency: "Latencia prom. (ms)",
+              tokensInOut: "Tokens In/Out",
+              cost: "Costo ($)",
+            },
+            byok: {
+              title: "Bring Your Own Key (BYOK)",
+              subtitle: "Conecta tus propias claves de proveedor de IA.",
+              encryptedVault: "Encriptado en Vault",
+              notConfigured: "No configurado",
+              configure: "Configurar",
+              manage: "Gestionar",
+              keyLabel: "API Key",
+              keyPlaceholder: "sk-••••••••••••••••",
+              vaultNote:
+                "Las claves se cifran y se almacenan de forma segura en Vault. Nunca se exponen en el navegador.",
+              save: "Guardar",
+              cancel: "Cancelar",
+              saved: "Clave guardada",
+            },
+            empty: {
+              title: "Sin consumo en este período",
+              recommendation:
+                "Envía solicitudes a través del gateway para comenzar a ver métricas.",
+            },
+            ranges: {
+              h24: "24 horas",
+              h7d: "7 días",
+              h30d: "30 días",
+              h90d: "90 días",
+              custom: "Personalizado",
+            },
+            custom: {
+              from: "Desde",
+              to: "Hasta",
+              apply: "Aplicar",
+            },
+            routing: {
+              title: "Ruteo y Failover",
+              failover:
+                "Conmutación automática por error cuando el proveedor primario está sobrecargado o no disponible.",
+            },
           },
         },
         settings: {
@@ -1288,13 +1619,17 @@ export const translations = {
             title: "Facturación",
             description: "Gestiona tu suscripción y métodos de pago.",
             usage30: "Uso — últimos 30 días",
+            loadingUsage: "Cargando uso...",
+            emptyUsage: "Todavía no hay uso en este período.",
             balance: "Saldo:",
             used: "Usado:",
             rechargeTitle: "Recarga de créditos",
             rechargeSubtitle:
               "Agrega créditos a tu cuenta. Los créditos se consumen por reporte y solicitud de IA.",
             subscriptionTitle: "Suscripción",
-            subscriptionSubtitle: "Elige el plan que mejor se ajuste a tus necesidades.",
+            subscriptionSubtitle:
+              "Elige el plan que mejor se ajuste a tus necesidades.",
+            currentPlanLabel: "Plan actual",
             customPlaceholder: "Personalizado ($100 – $100.000)",
             rechargeButton: "Recargar",
             plans: [
