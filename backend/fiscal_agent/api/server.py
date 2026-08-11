@@ -7,6 +7,7 @@ Run with::
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -26,28 +27,50 @@ from fiscal_agent.api.middleware import (
 from fiscal_agent.api.routes import admin, calendar, chat, conversations, extract, health, memory, monitor, report
 from fiscal_agent.api.store import RedisStore, TenantStore
 from fiscal_agent.config import get_settings
+from fiscal_agent.db.session import async_session_factory, engine
 from fiscal_agent.models import ApiError, UnifiedResponse
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-	"""Connect Redis, seed defaults on empty store, close on shutdown."""
-	settings = get_settings()
-	redis_client = redis.from_url(settings.redis.url, decode_responses=True)
-	store = RedisStore(redis_client)
-	tenant_store = TenantStore(redis_client)
-	app.state.redis = redis_client
-	app.state.store = store
-	app.state.tenant_store = tenant_store
+	"""Connect Redis (degraded-tolerant) + expose the Postgres engine/session.
 
-	# Seed if empty
-	await store.seed_defaults()
-	await tenant_store.seed_defaults()
+	Redis absence no longer crashes boot: the app starts degraded, ``/v1/health``
+	stays reachable (reports ``redis=down``), and AuthMiddleware answers 503 on
+	guarded endpoints. Non-public endpoints still need Redis for rate limiting.
+	"""
+	settings = get_settings()
+
+	redis_client: redis.Redis | None = None
+	try:
+		redis_client = redis.from_url(settings.redis.url, decode_responses=True)
+		store = RedisStore(redis_client)
+		tenant_store = TenantStore(redis_client)
+		app.state.redis = redis_client
+		app.state.store = store
+		app.state.tenant_store = tenant_store
+
+		# Seed if empty
+		await store.seed_defaults()
+		await tenant_store.seed_defaults()
+	except Exception as exc:
+		logger.warning('Redis init falló — arrancando degradado: %s', exc)
+		app.state.redis = None
+		app.state.store = None
+		app.state.tenant_store = None
+
+	# Postgres (Fase 1) — lazy async engine, no eager connect.
+	app.state.engine = engine
+	app.state.session_factory = async_session_factory
 
 	yield  # Server is now serving
 
 	# Clean shutdown
-	await redis_client.aclose()
+	if redis_client is not None:
+		await redis_client.aclose()
+	await engine.dispose()
 
 
 app = FastAPI(

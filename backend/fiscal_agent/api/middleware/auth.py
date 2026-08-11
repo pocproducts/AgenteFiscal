@@ -88,10 +88,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
 		# ── Public path bypass ────────────────────────────────────────
 		# NOTE: CORS preflight (OPTIONS) is handled by CORSMiddleware
 		# (outermost), so it never reaches AuthMiddleware.
-		if request.method == 'GET' and request.url.path in _PUBLIC_PATHS:
+		if request.method in ('GET', 'POST') and request.url.path in _PUBLIC_PATHS:
 			return await call_next(request)
-		if request.method == 'POST' and request.url.path in _PUBLIC_PATHS:
-			return await call_next(request)
+
+		# ── Redis down — boot was degraded but the app stayed up ────────
+		# Health stays reachable (public path above); every other request
+		# must fail fast with 503 instead of an AttributeError stacktrace.
+		if getattr(request.app.state, 'redis', None) is None:
+			return JSONResponse(
+				status_code=503,
+				content=UnifiedResponse(
+					status='error',
+					error=ApiError(code='SERVICE_UNAVAILABLE', cause='Servicio temporalmente no disponible'),
+				).model_dump(),
+			)
 
 		# ── Extract raw key (Bearer preferred, fallback X-API-Key) ────
 		raw_key: str | None = None
@@ -128,7 +138,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 		if raw_key.startswith('fa_'):
 			ok = await self._resolve_api_key(raw_key, request, redis, store)
 		else:
-			extractor = ClerkJWTExtractor()
+			factory = getattr(request.app.state, 'session_factory', None)
+			extractor = ClerkJWTExtractor(factory)
 			ok = await extractor.handle(raw_key, request, redis)
 
 		if not ok:
