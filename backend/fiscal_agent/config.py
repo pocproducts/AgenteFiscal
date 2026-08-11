@@ -29,6 +29,21 @@ class RedisConfig(BaseSettings):
 	max_mb: int = Field(default=25, alias='MEMORY_REDIS_MAX_MB')
 
 
+class DatabaseConfig(BaseSettings):
+	"""PostgreSQL connection settings (Neon).
+
+	Env vars:
+	  - ``DATABASE_URL`` — pooled URL; used by the application async engine
+	  - ``DATABASE_URL_UNPOOLED`` — direct URL; used by Alembic migrations
+	    (transaction poolers break the prepared-statement protocol)
+	"""
+
+	model_config = SettingsConfigDict(env_file='.env', extra='ignore')
+
+	url: str = Field(default='', alias='DATABASE_URL')
+	url_unpooled: str = Field(default='', alias='DATABASE_URL_UNPOOLED')
+
+
 class Credentials(BaseSettings):
 	"""Estudio contable credentials and API keys.
 
@@ -57,9 +72,16 @@ class AppSettings(BaseSettings):
 		backward compatibility with existing callers.
 	"""
 
-	model_config = SettingsConfigDict(env_file='.env', extra='ignore')
+	model_config = SettingsConfigDict(
+		env_file='.env',
+		extra='ignore',
+		# pydantic-settings 2.15+ JSON-decodes complex fields at source level,
+		# which would crash on comma-separated values like CORS_ORIGINS.
+		enable_decoding=False,
+	)
 
 	redis: RedisConfig = RedisConfig()
+	database: DatabaseConfig = DatabaseConfig()
 
 	# ── CORS origins (comma-separated env var) ───────────────────────────
 	cors_origins: list[str] = Field(

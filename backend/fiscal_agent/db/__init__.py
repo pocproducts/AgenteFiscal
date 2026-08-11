@@ -1,0 +1,57 @@
+"""Database package: SQLAlchemy async engine, models, and helpers."""
+
+from fiscal_agent.db.models import (  # noqa: F401  (register models on Base.metadata)
+    ApiKey,
+    App,
+    BillingEvent,
+    Client,
+    Conversation,
+    GeneratedPdf,
+    Invoice,
+    Message,
+    Payment,
+    Plan,
+    PlanPrice,
+    ReportRun,
+    Subscription,
+    Tenant,
+    TenantMember,
+    TokenBalance,
+    TokenPackage,
+    TokenTransaction,
+    User,
+)
+from fiscal_agent.db.base import Base
+from fiscal_agent.db.session import (
+    async_session_factory,
+    engine,
+    get_session,
+    run_sync,
+)
+
+__all__ = [
+    'ApiKey',
+    'App',
+    'BillingEvent',
+    'Base',
+    'Client',
+    'Conversation',
+    'GeneratedPdf',
+    'Invoice',
+    'Message',
+    'Payment',
+    'Plan',
+    'PlanPrice',
+    'ReportRun',
+    'Subscription',
+    'Tenant',
+    'TenantMember',
+    'TokenBalance',
+    'TokenPackage',
+    'TokenTransaction',
+    'User',
+    'async_session_factory',
+    'engine',
+    'get_session',
+    'run_sync',
+]
