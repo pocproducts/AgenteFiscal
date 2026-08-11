@@ -1,0 +1,179 @@
+{
+  "version": "2026",
+  "fuente": "ARCA Calendario Fiscal",
+  "notas": {
+    "autonomos": "1a quincena Pago a cuenta / 2a quincena DDJJ e ingreso del saldo",
+    "iva_ddjj": "Presentacion y pago del saldo resultante de la DDJJ mensual",
+    "monotributo": "Cuota mensual - vence el dia 20 de cada mes o proximo habil posterior",
+    "empleadores_sicoss": "Presentacion y pago de SICOSS por empleados en relacion de dependencia",
+    "ganancias_sociedades": "DDJJ anual de Ganancias para sociedades - vence segun terminacion CUIT",
+    "anticipos_ganancias": "Anticipos mensuales/bimestrales de Ganancias",
+    "convenio_multilateral": "IIBB - Convenio Multilateral - presentacion y pago mensual",
+    "gcias_bienes": "Ganancias / Bienes Personales - Fondo Cooperativo",
+    "internos_ddjj": "Impuestos Internos - presentacion DDJJ mensual",
+    "ret_perc_sicore_sire": "Retenciones y Percepciones - SICORE / SIRE",
+    "personal_casas": "Personal de Casas Particulares - pago mensual (Oblig. y Volunt.)"
+  },
+  "por_tipo": {
+    "responsable_inscripto": {
+      "iva_ddjj": {
+        "key": "iva_ddjj",
+        "label": "IVA DDJJ",
+        "id_impuesto": 30,
+        "grupos_cuit": [
+          {"desde": 0, "hasta": 1, "columna": "IVA DDJJ"},
+          {"desde": 2, "hasta": 3, "columna": "IVA DDJJ.1"},
+          {"desde": 4, "hasta": 5, "columna": "IVA DDJJ.2"},
+          {"desde": 6, "hasta": 7, "columna": "IVA DDJJ.3"},
+          {"desde": 8, "hasta": 9, "columna": "IVA DDJJ.4"}
+        ],
+        "meses": {
+          "1": 22, "2": 23, "3": 25, "4": 23, "5": 21, "6": 23,
+          "7": 23, "8": 21, "9": 23, "10": 22, "11": 24, "12": 23
+        }
+      },
+      "ganancias_sociedades": {
+        "key": "ganancias_sociedades",
+        "label": "Ganancias Sociedades DDJJ",
+        "id_impuesto": 10,
+        "grupos_cuit": [
+          {"desde": 0, "hasta": 3, "columna": "GANANCIAS SOCIEDADES DDJJ"},
+          {"desde": 4, "hasta": 6, "columna": "GANANCIAS SOCIEDADES DDJJ.1"},
+          {"desde": 7, "hasta": 9, "columna": "GANANCIAS SOCIEDADES DDJJ.2"}
+        ],
+        "meses": {
+          "1": 18, "2": 19, "3": 20, "4": 18, "5": 20, "6": 18,
+          "7": 20, "8": 19, "9": 18, "10": 20, "11": 19, "12": 18
+        }
+      },
+      "anticipos_ganancias": {
+        "key": "anticipos_ganancias",
+        "label": "Anticipos Ganancias",
+        "id_impuesto": 10,
+        "grupos_cuit": [
+          {"desde": 0, "hasta": 3, "columna": "ANTICIPOS(1)"},
+          {"desde": 4, "hasta": 6, "columna": "ANTICIPOS(1).1"},
+          {"desde": 7, "hasta": 9, "columna": "ANTICIPOS(1).2"}
+        ],
+        "meses": {
+          "1": 15, "2": 16, "3": 17, "4": 15, "5": 17, "6": 15,
+          "7": 17, "8": 16, "9": 15, "10": 17, "11": 16, "12": 15
+        }
+      },
+      "gcias_bienes": {
+        "key": "gcias_bienes",
+        "label": "Ganancias/Bienes Personales Fondo Coop.",
+        "id_impuesto": 10,
+        "grupos_cuit": [
+          {"desde": 0, "hasta": 3, "columna": "GCIAS./BIENES/FONDO COOP."},
+          {"desde": 4, "hasta": 6, "columna": "GCIAS./BIENES/FONDO COOP..1"},
+          {"desde": 7, "hasta": 9, "columna": "GCIAS./BIENES/FONDO COOP..2"}
+        ],
+        "meses": {
+          "1": 19, "2": 19, "3": 19, "4": 17, "5": 19, "6": 17,
+          "7": 19, "8": 17, "9": 19, "10": 17, "11": 19, "12": 17
+        }
+      },
+      "ret_perc_sicore_sire": {
+        "key": "ret_perc_sicore_sire",
+        "label": "Ret./Perc. SICORE/SIRE",
+        "id_impuesto": null,
+        "grupos_cuit": [
+          {"desde": 0, "hasta": 3, "columna": "RET./PERC. SICORE/SIRE"},
+          {"desde": 4, "hasta": 6, "columna": "RET./PERC. SICORE/SIRE.1"},
+          {"desde": 7, "hasta": 9, "columna": "RET./PERC. SICORE/SIRE.2"}
+        ],
+        "meses": {
+          "1": 14, "2": 14, "3": 14, "4": 14, "5": 14, "6": 14,
+          "7": 14, "8": 14, "9": 14, "10": 14, "11": 14, "12": 14
+        }
+      },
+      "convenio_multilateral": {
+        "key": "convenio_multilateral",
+        "label": "Convenio Multilateral IIBB",
+        "id_impuesto": null,
+        "grupos_cuit": [
+          {"desde": 0, "hasta": 2, "columna": "CONVENIO MULTILATERAL(2)"},
+          {"desde": 3, "hasta": 5, "columna": "CONVENIO MULTILATERAL(2).1"},
+          {"desde": 6, "hasta": 7, "columna": "CONVENIO MULTILATERAL(2).2"},
+          {"desde": 8, "hasta": 9, "columna": "CONVENIO MULTILATERAL(2).3"}
+        ],
+        "meses": {
+          "1": 21, "2": 21, "3": 21, "4": 21, "5": 21, "6": 21,
+          "7": 21, "8": 21, "9": 21, "10": 21, "11": 21, "12": 21
+        }
+      },
+      "empleadores_sicoss": {
+        "key": "empleadores_sicoss",
+        "label": "Empleadores SICOSS",
+        "id_impuesto": null,
+        "grupos_cuit": [
+          {"desde": 0, "hasta": 3, "columna": "EMPLEADORES (SICOSS)"},
+          {"desde": 4, "hasta": 6, "columna": "EMPLEADORES (SICOSS).1"},
+          {"desde": 7, "hasta": 9, "columna": "EMPLEADORES (SICOSS).2"}
+        ],
+        "meses": {
+          "1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16,
+          "7": 16, "8": 16, "9": 16, "10": 16, "11": 16, "12": 16
+        }
+      },
+      "personal_casas": {
+        "key": "personal_casas",
+        "label": "Personal Casas Particulares",
+        "id_impuesto": null,
+        "grupos_cuit": [
+          {"desde": 0, "hasta": 9, "columna": "PERSONAL CASAS (Oblig.)"},
+          {"desde": 0, "hasta": 9, "columna": "PERSONAL CASAS (Volunt.)"}
+        ],
+        "meses": {
+          "1": 11, "2": 11, "3": 11, "4": 11, "5": 11, "6": 11,
+          "7": 11, "8": 11, "9": 11, "10": 11, "11": 11, "12": 11
+        }
+      },
+      "internos_ddjj": {
+        "key": "internos_ddjj",
+        "label": "Impuestos Internos DDJJ",
+        "id_impuesto": null,
+        "grupos_cuit": [
+          {"desde": 0, "hasta": 3, "columna": "INTERNOS DDJJ"},
+          {"desde": 4, "hasta": 6, "columna": "INTERNOS DDJJ.1"},
+          {"desde": 7, "hasta": 9, "columna": "INTERNOS DDJJ.2"}
+        ],
+        "meses": {
+          "1": 24, "2": 24, "3": 24, "4": 24, "5": 24, "6": 24,
+          "7": 24, "8": 24, "9": 24, "10": 24, "11": 24, "12": 24
+        }
+      }
+    },
+    "monotributo": {
+      "monotributo": {
+        "key": "monotributo",
+        "label": "Monotributo",
+        "id_impuesto": null,
+        "grupos_cuit": [
+          {"desde": 0, "hasta": 9, "columna": "MONOTRIBUTO"}
+        ],
+        "meses": {
+          "1": 20, "2": 20, "3": 20, "4": 20, "5": 20, "6": 20,
+          "7": 20, "8": 20, "9": 20, "10": 20, "11": 20, "12": 20
+        }
+      }
+    },
+    "autonomo": {
+      "autonomos": {
+        "key": "autonomos",
+        "label": "Autonomos",
+        "id_impuesto": null,
+        "grupos_cuit": [
+          {"desde": 0, "hasta": 3, "columna": "AUTONOMOS"},
+          {"desde": 4, "hasta": 6, "columna": "AUTONOMOS.1"},
+          {"desde": 7, "hasta": 9, "columna": "AUTONOMOS.2"}
+        ],
+        "meses": {
+          "1": 17, "2": 17, "3": 17, "4": 17, "5": 17, "6": 17,
+          "7": 17, "8": 17, "9": 17, "10": 17, "11": 17, "12": 17
+        }
+      }
+    }
+  }
+}
