@@ -4,41 +4,152 @@ import {
   createUIMessageStreamResponse,
   generateId,
 } from "ai";
-import type { AgentSessionSnapshot } from "@/lib/ai/tools/agent-execution";
-import { buildSubtasksForTool } from "@/lib/ai/tools/agent-execution";
-import { FISCAL_COMMAND_MAP } from "@/lib/ai/tools/fiscal-tools";
+import { BackendError, callBackend } from "@/lib/backend/client";
 import {
   getChatById,
   saveChat,
-  saveChatActivity,
   saveMessages,
   updateChatStatusById,
   updateChatTitleById,
 } from "@/lib/db/queries";
-import { ChatbotError } from "@/lib/errors";
+import { ChatbotError, type ErrorCode } from "@/lib/errors";
 import { generateUUID } from "@/lib/utils";
 
-export const maxDuration = 60;
-
-// ─── Mock delay config ────────────────────────────────────────────────────────
-// 5 000 ms total per tool. Tasks share the budget proportionally.
-const TOOL_MOCK_DELAY_MS = 5000;
+// Allow time for the real backend fiscal pipeline (ARCA WS calls, report
+// build) on top of the AI SDK stream overhead. The BFF call itself uses a
+// 60s timeout; this guards the whole serverless invocation.
+export const maxDuration = 300;
 
 // In-flight dedupe: the client (or a StrictMode double-effect / double click)
 // can fire the same launch request twice. A second execution of the identical
-// chat+message would duplicate every tool, agent session, and persisted
-// message. Track executions per chatId+message signature and short-circuit
-// duplicates with a no-op stream (no chunks -> nothing is appended client-side).
+// chat+message would duplicate the backend call and persisted messages. Track
+// executions per chatId+message signature and short-circuit duplicates with a
+// no-op stream (no chunks -> nothing is appended client-side).
 const inFlightExecutions = new Map<string, true>();
 
-function generateAgentId(): string {
-  return `agent-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+// Structured response shape returned by the backend's POST /v1/chat/message
+// (fiscal_agent/api/routes/chat.py -> ChatResponse).
+interface ChatResponse {
+  conversation_id: string;
+  reply: string;
+  actions_taken: string[];
+  data: Record<string, unknown> | null;
+}
+
+interface HistoryEntry {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface ClientUIMessage {
+  role?: string;
+  content?: string | null;
+  parts?: Array<{ type?: string; text?: string }>;
+}
+
+// Split a long reply into small stream deltas so the client renders text
+// progressively instead of one large blob.
+function chunkText(text: string, maxChunk = 80): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  const tokens = text.split(/(\s+)/);
+  for (const token of tokens) {
+    if ((current + token).length > maxChunk && current) {
+      chunks.push(current);
+      current = token;
+    } else {
+      current += token;
+    }
+  }
+  if (current) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+
+// Flatten prior client messages into the backend's [{role, content}] history
+// format. The operative last message is excluded; tool/non-text parts are
+// skipped and client roles are mapped to the backend's user/assistant.
+function buildHistory(uiMessages: ClientUIMessage[]): HistoryEntry[] {
+  const history: HistoryEntry[] = [];
+  for (const msg of uiMessages.slice(0, -1)) {
+    if (msg.role !== "user" && msg.role !== "assistant") {
+      continue;
+    }
+    const content =
+      typeof msg.content === "string"
+        ? msg.content
+        : (msg.parts
+            ?.filter((p) => p.type === "text")
+            .map((p) => String(p.text ?? ""))
+            .join("") ?? "");
+    const trimmed = content.trim();
+    if (!trimmed) {
+      continue;
+    }
+    history.push({ role: msg.role, content: trimmed });
+  }
+  return history;
+}
+
+// Map a BFF/backend failure to the canonical ChatbotError code the client's
+// onError handler understands (hooks/use-active-chat.tsx). The default 10s
+// BFF timeout is not used here; the route passes its own 60s timeout.
+function backendErrorToCode(err: BackendError): ErrorCode {
+  if (err.status === 401) {
+    return "unauthorized:chat";
+  }
+  if (err.status === 404) {
+    return "not_found:chat";
+  }
+  if (err.status === 429) {
+    return "rate_limit:chat";
+  }
+  if (err.status === 502 || err.status === 503 || err.status === 504) {
+    return "offline:chat";
+  }
+  if (err.status >= 400 && err.status < 500) {
+    return "bad_request:chat";
+  }
+  return "offline:chat";
+}
+
+function describeBackendError(err: unknown): {
+  code: ErrorCode;
+  detail: string;
+} {
+  if (err instanceof BackendError) {
+    return { code: backendErrorToCode(err), detail: err.detail ?? err.message };
+  }
+  const detail = err instanceof Error ? err.message : String(err);
+  return { code: "offline:chat", detail };
+}
+
+async function persistAssistantMessage(chatId: string, text: string) {
+  if (!text) {
+    return;
+  }
+  await saveMessages({
+    messages: [
+      {
+        id: generateUUID(),
+        chatId,
+        role: "assistant",
+        parts: [{ type: "text", text }],
+        attachments: [],
+        createdAt: new Date(),
+      },
+    ],
+  });
 }
 
 /**
- * API Chat - Fiscal Console (Mock)
- * Tools execute sequentially (concatenated). Each tool emits task-level
- * stream events so the sidebar can track per-task progress in real time.
+ * API Chat - Fiscal Console (backend-backed)
+ * Forwards the user's natural language message to the real Python backend
+ * (POST /v1/chat/message through the BFF client, which forwards the Clerk
+ * JWT) and re-emits its reply as an AI SDK UI stream (text-start /
+ * text-delta / text-end, data-chat-title) so the existing consumer
+ * components need no changes.
  */
 export async function POST(request: Request) {
   const body = await request.json();
@@ -48,7 +159,6 @@ export async function POST(request: Request) {
     message: singularMessage,
     isToolApprovalFlow,
     selectedVisibilityType,
-    profileId,
   } = body;
 
   const visibility = selectedVisibilityType || "private";
@@ -135,355 +245,107 @@ export async function POST(request: Request) {
       ).trim();
     }
 
-    const fiscalMatch = userText.match(
-      /^(\d{11})\s+((?:\/[^/]+?)(?:\s+\/[^/]+?)*)?\s*$/i
-    );
-    const cuit = fiscalMatch ? fiscalMatch[1] : null;
+    const quickCuitMatch = userText.match(/(\d{11})/);
+    const cuit = quickCuitMatch ? quickCuitMatch[1] : null;
 
-    if (fiscalMatch && cuit) {
-      console.log("FISCAL CONSOLE EXECUTION - CUIT:", cuit);
-
-      const executionKey = `${id}:${userText}`;
-      if (inFlightExecutions.has(executionKey)) {
-        console.log("Duplicate fiscal execution skipped:", executionKey);
-        // No-op stream: no chunks -> the client appends nothing, so no
-        // duplicated tools/sessions/messages reach the UI.
-        const noopStream = createUIMessageStream({
-          // Intentionally empty: a no-op stream appends nothing client-side.
-          execute: async () => {
-            await Promise.resolve();
-          },
-          generateId: generateUUID,
-        });
-        return createUIMessageStreamResponse({ stream: noopStream });
-      }
-      inFlightExecutions.set(executionKey, true);
-
-      const streamInstance = createUIMessageStream({
-        originalMessages: isToolApprovalFlow ? uiMessages : undefined,
-        execute: async ({ writer: dataStream }) => {
-          try {
-            const textPartId = generateId();
-            dataStream.write({ type: "text-start", id: textPartId });
-
-            const commandsSection = fiscalMatch[2] ?? "";
-            let commandNames = (
-              commandsSection.match(/\/([^/]+?)(?=\s*\/|$)/g) ?? []
-            ).map((c: any) => c.slice(1).trim().toLowerCase());
-
-            // Macro expansion for /todo
-            if (commandNames.includes("todo")) {
-              commandNames = [
-                "consultaarca",
-                "sistemaregistral",
-                "misfacilidades",
-                "deudavencimientos",
-                "rentascordoba",
-                "calendariovencimientosarca",
-                "informefiscal",
-                "enviarmail",
-              ];
-            }
-
-            // Every automation pipeline MUST end with the mail-sending step:
-            // regardless of the requested tools, the user needs the input field
-            // to send the consolidated report, and that input (via the
-            // [MAIL_INPUT_REPLACEMENT] marker) becomes part of the persisted
-            // report history restored when the report is reopened.
-            if (
-              commandNames.length > 0 &&
-              !commandNames.includes("enviarmail")
-            ) {
-              commandNames.push("enviarmail");
-            }
-
-            const LABEL_MAP: Record<string, string> = {
-              consultaarca: "ConsultaArca",
-              sistemaregistral: "SistemaRegistral",
-              misfacilidades: "MisFacilidades",
-              deudavencimientos: "DeudaVencimientos",
-              rentascordoba: "RentasCordoba",
-              calendariovencimientosarca: "CalendarioVencimientosArca",
-              informefiscal: "📖 InformeFiscal",
-              enviarmail: "EnviarMail",
-            };
-
-            const formatSummary = (cmd: string, data: any) => {
-              switch (cmd) {
-                case "consultaarca":
-                  return `**Denominación**: ${data.denominacion}\n- **Condición**: ${data.condicionFiscal}\n- **Impuestos**: ${data.obligaciones.map((o: any) => `${o.impuesto} (${o.estado})`).join(", ")}`;
-                case "sistemaregistral":
-                  return `**Razón Social**: ${data.razonSocial}\n- **Actividad**: ${data.actividadPrincipal.descripcion}\n- **Domicilio**: ${data.domicilioFiscal.calle} ${data.domicilioFiscal.numero}, ${data.domicilioFiscal.localidad}`;
-                case "misfacilidades":
-                  return data.planesActivos.length > 0
-                    ? `**Planes Activos**: ${data.planesActivos.map((p: any) => `${p.regimen} (${p.estadoPlan})`).join(", ")}`
-                    : "No hay planes de pago activos.";
-                case "deudavencimientos":
-                  return `**Saldo Total**: $${data.saldoTotal}\n- **Deudas Vencidas**: ${data.deudasVencidas.length}\n- **Próximo Vencimiento**: ${data.proximoVencimiento}`;
-                case "rentascordoba":
-                  return `**Inscripción**: ${data.inscripcionIIBB.tipo}\n- **Estado**: ${data.inscripcionIIBB.estado}\n- **Saldo a Favor**: $${data.declaracionesJuradas.saldoAFavor}`;
-                case "calendariovencimientosarca":
-                  return `**Periodo**: ${data.periodo}\n- **Vencimientos Próximos**: ${data.vencimientos
-                    .slice(0, 3)
-                    .map((v: any) => `${v.fecha}: ${v.obligacion}`)
-                    .join(", ")}`;
-                case "informefiscal":
-                  return `**Riesgo Fiscal [Score]**: ${data.metadata.scoreRiesgoFiscal}/100\n- **ID**: ${data.metadata.idReporte}\n- **Estado General**: ${data.resumenCumplimiento.map((r: any) => `${r.area}: ${r.estado}`).join(", ")}`;
-                case "enviarmail":
-                  return `**ID Transacción**: ${data.transaccion.idEnvio}\n- **Archivo**: ${data.archivoAdjunto.nombre}\n- **Peso**: ${data.archivoAdjunto.tamaño}`;
-                default:
-                  return "Resumen no disponible.";
-              }
-            };
-
-            // Accumulate the assistant's visible text so the completed report can
-            // be persisted to history and restored coherently on reopen.
-            const assistantDeltas: string[] = [];
-            const emitAssistantText = (delta: string) => {
-              assistantDeltas.push(delta);
-              dataStream.write({
-                type: "text-delta",
-                id: textPartId,
-                delta,
-              });
-            };
-
-            emitAssistantText(`## Reporte Fiscal — CUIT ${cuit}\n\n`);
-
-            const allJsonReports: Array<{ tool: string; data: any }> = [];
-            const activity: AgentSessionSnapshot[] = [];
-
-            // ── Sequential (concatenated) tool execution ──────────────────────
-            for (const cmd of commandNames) {
-              const executor = FISCAL_COMMAND_MAP[cmd];
-              if (!executor) {
-                continue;
-              }
-
-              const label = LABEL_MAP[cmd] ?? cmd;
-              const isMonitorSession =
-                cmd !== "informefiscal" && cmd !== "enviarmail";
-              const agentId = generateAgentId();
-              const tasks = buildSubtasksForTool(cmd);
-              const taskCount = tasks.length;
-
-              // InformeFiscal & EnviarMail are NOT monitor sessions: they render
-              // only as inline chat output, so no data-agent-* events are emitted
-              // for them (and no "agent working" marker is written server-side).
-
-              if (isMonitorSession) {
-                // Notify client: session started
-                dataStream.write({
-                  type: "data-agent-session-start",
-                  data: {
-                    agentId,
-                    toolName: label,
-                    toolKey: cmd,
-                    profileId: profileId ?? null,
-                    tasks: tasks.map((t) => ({ id: t.id, label: t.label })),
-                  },
-                } as any);
-
-                // Write the "agent working" marker text so the button appears
-                emitAssistantText(`_Agente trabajando en ${label}..._\n\n`);
-              }
-
-              const sessionStartMs = Date.now();
-
-              if (cmd === "enviarmail") {
-                // EnviarMail: not a monitor session — emit mail input inline only.
-                await new Promise((r) => setTimeout(r, 1000));
-
-                emitAssistantText(
-                  `### 📧 ${label} · ⏱️ 0.5s · 👣 1 · 💰 $0\n> **Acción requerida**: Por favor, ingrese el mail de destino para enviar el reporte consolidado.\n\n[MAIL_INPUT_REPLACEMENT]\n\n`
-                );
-                continue;
-              }
-
-              // ── Generic tool: distribute 5s across all tasks sequentially ──
-              const delayPerTask = Math.floor(TOOL_MOCK_DELAY_MS / taskCount);
-              const taskDurations: number[] = [];
-
-              for (const task of tasks) {
-                const taskStart = Date.now();
-
-                // Task → running
-                if (isMonitorSession) {
-                  dataStream.write({
-                    type: "data-agent-task-update",
-                    data: { agentId, taskId: task.id, status: "running" },
-                  } as any);
-                }
-
-                await new Promise((r) => setTimeout(r, delayPerTask));
-
-                const taskDuration = Date.now() - taskStart;
-                taskDurations.push(taskDuration);
-                // Mock cost: 0.4 cents ($0.004) per subtask
-                const costCents = 0.4;
-
-                if (isMonitorSession) {
-                  // Task → completed
-                  dataStream.write({
-                    type: "data-agent-task-update",
-                    data: {
-                      agentId,
-                      taskId: task.id,
-                      status: "completed",
-                      durationMs: taskDuration,
-                      costCents,
-                    },
-                  } as any);
-                }
-              }
-
-              // Execute the actual (mocked) function after the visual delay
-              const data = await executor(cuit);
-              const totalDurationMs = Date.now() - sessionStartMs;
-              const duration = (totalDurationMs / 1000).toFixed(1);
-
-              if (cmd !== "informefiscal") {
-                allJsonReports.push({ tool: label, data });
-              }
-
-              if (isMonitorSession) {
-                // Notify client: session completed
-                dataStream.write({
-                  type: "data-agent-session-complete",
-                  data: { agentId, durationMs: totalDurationMs },
-                } as any);
-              }
-
-              const totalCostCents = tasks.length * 0.4;
-              const formattedCost = (totalCostCents / 100).toFixed(3);
-
-              if (isMonitorSession) {
-                // Snapshot the session so it can be restored from history.
-                activity.push({
-                  agentId,
-                  toolKey: cmd,
-                  toolName: label,
-                  tasks: tasks.map((t, i) => ({
-                    id: t.id,
-                    label: t.label,
-                    status: "completed",
-                    durationMs: taskDurations[i],
-                    costCents: 0.4,
-                  })),
-                  startedAt: sessionStartMs,
-                  completedAt: Date.now(),
-                  totalCostCents,
-                });
-              }
-
-              if (cmd === "informefiscal") {
-                const enc = Buffer.from(
-                  JSON.stringify(allJsonReports)
-                ).toString("base64");
-                const delta = `### 🔍 ${label} · ⏱️ ${duration}s · 👣 5 · 💰 $${formattedCost}\n\n<details><summary>📦 Ver JSON</summary>\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n\n</details>\n\n[INFORME_FISCAL_BUTTON:${enc}]\n\n---\n\n`;
-                emitAssistantText(delta);
-              } else {
-                const delta = `### 🔍 ${label} · ⏱️ ${duration}s · 👣 5 · 💰 $${formattedCost}\n\n<details><summary>📦 Ver JSON</summary>\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n\n</details>\n\n<details><summary>📋 Ver Reporte Formateado</summary>\n\n${formatSummary(cmd, data)}\n\n</details>\n\n---\n\n`;
-                emitAssistantText(delta);
-              }
-            }
-            // ── End of sequential execution ───────────────────────────────────
-
-            dataStream.write({ type: "text-end", id: textPartId });
-
-            if (uiMessages.length === 1) {
-              const now = new Date();
-              const day = now.getDate().toString().padStart(2, "0");
-              const month = (now.getMonth() + 1).toString().padStart(2, "0");
-              const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
-              const timestamp = `${day}/${month} ${time}`;
-              const title = `Informe ${cuit} — ${timestamp}`;
-              dataStream.write({ type: "data-chat-title", data: title });
-              try {
-                await updateChatTitleById({ chatId: id, title });
-              } catch (err) {
-                console.error("Failed to save chat title:", err);
-              }
-            }
-
-            // Persist the executed agent sessions so the monitor can be restored
-            // from history on reload (informefiscal/enviarmail are excluded).
-            if (activity.length > 0) {
-              try {
-                await saveChatActivity({ chatId: id, activity });
-              } catch (err) {
-                console.error("Failed to save agent activity:", err);
-              }
-            }
-
-            // Flip the chat to "done" now that the fiscal tool sequence finished,
-            // so the sidebar history list can drop its "running" indicator.
-            try {
-              await updateChatStatusById({ chatId: id, status: "done" });
-            } catch (err) {
-              console.error("Failed to update chat status:", err);
-            }
-
-            // Persist the assistant's full visible response so a report opened
-            // from history shows all the steps it performed (not an empty Greeting).
-            if (assistantDeltas.length > 0) {
-              try {
-                await saveMessages({
-                  messages: [
-                    {
-                      id: generateUUID(),
-                      chatId: id,
-                      role: "assistant",
-                      parts: [
-                        {
-                          type: "text",
-                          text: assistantDeltas.join(""),
-                        },
-                      ],
-                      attachments: [],
-                      createdAt: new Date(),
-                    },
-                  ],
-                });
-              } catch (err) {
-                console.error("Failed to save assistant report:", err);
-              }
-            }
-          } finally {
-            inFlightExecutions.delete(executionKey);
-          }
+    const executionKey = `${id}:${userText}`;
+    if (inFlightExecutions.has(executionKey)) {
+      console.log("Duplicate fiscal execution skipped:", executionKey);
+      // No-op stream: no chunks -> the client appends nothing, so no
+      // duplicated backend calls/messages reach the UI.
+      const noopStream = createUIMessageStream({
+        // Intentionally empty: a no-op stream appends nothing client-side.
+        execute: async () => {
+          await Promise.resolve();
         },
         generateId: generateUUID,
       });
-
-      return createUIMessageStreamResponse({ stream: streamInstance });
+      return createUIMessageStreamResponse({ stream: noopStream });
     }
+    inFlightExecutions.set(executionKey, true);
 
-    // Fallback: non-fiscal input
-    const stream = createUIMessageStream({
+    const streamInstance = createUIMessageStream({
+      originalMessages: isToolApprovalFlow ? uiMessages : undefined,
       execute: async ({ writer: dataStream }) => {
         const textPartId = generateId();
         dataStream.write({ type: "text-start", id: textPartId });
-        dataStream.write({
-          type: "text-delta",
-          id: textPartId,
-          delta:
-            "⚠️ **El sistema de Chat General está desactivado.**\n\nEste entorno está configurado exclusivamente como **Consola Fiscal**. Para generar un reporte, ingrese un CUIT seguido de los comandos deseados (ej: `20389727785 /ConsultaArca /RentasCordoba`).",
-        });
-        dataStream.write({ type: "text-end", id: textPartId });
 
-        // No tools ran, but the chat row (created above for the first
-        // message) must not stay stuck on "running" in the sidebar.
+        let assistantText = "";
         try {
-          await updateChatStatusById({ chatId: id, status: "done" });
+          // The backend is the sole intent router: forward every message,
+          // even ones without a CUIT — it answers with its help/UNKNOWN reply.
+          const history = buildHistory(uiMessages as ClientUIMessage[]);
+          const res = await callBackend<ChatResponse>("/v1/chat/message", {
+            method: "POST",
+            body: {
+              message: userText,
+              conversation_id: id,
+              history: history.length ? history : null,
+            },
+            timeoutMs: 60_000,
+          });
+
+          assistantText = res.reply;
+          if (res.data && typeof res.data === "object") {
+            // Keep raw structured results visible for debugging.
+            assistantText += `\n\n<details><summary>Datos</summary>\n\n\`\`\`json\n${JSON.stringify(res.data, null, 2)}\n\`\`\`\n\n</details>`;
+          }
+
+          for (const chunk of chunkText(assistantText)) {
+            dataStream.write({
+              type: "text-delta",
+              id: textPartId,
+              delta: chunk,
+            });
+          }
         } catch (err) {
-          console.error("Failed to update chat status:", err);
+          const { code, detail } = describeBackendError(err);
+          assistantText = `No pude completar la consulta: ${detail}`;
+          console.error(`[chat] backend chat request failed (${code}):`, err);
+          dataStream.write({
+            type: "text-delta",
+            id: textPartId,
+            delta: assistantText,
+          });
+        } finally {
+          dataStream.write({ type: "text-end", id: textPartId });
+
+          if (uiMessages.length === 1) {
+            const now = new Date();
+            const day = now.getDate().toString().padStart(2, "0");
+            const month = (now.getMonth() + 1).toString().padStart(2, "0");
+            const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+            const timestamp = `${day}/${month} ${time}`;
+            const title = cuit
+              ? `Informe ${cuit} — ${timestamp}`
+              : `Consulta Fiscal — ${timestamp}`;
+            dataStream.write({ type: "data-chat-title", data: title });
+            try {
+              await updateChatTitleById({ chatId: id, title });
+            } catch (titleErr) {
+              console.error("Failed to save chat title:", titleErr);
+            }
+          }
+
+          try {
+            await persistAssistantMessage(id, assistantText);
+          } catch (persistErr) {
+            console.error("Failed to save assistant report:", persistErr);
+          }
+
+          try {
+            await updateChatStatusById({ chatId: id, status: "done" });
+          } catch (statusErr) {
+            console.error("Failed to update chat status:", statusErr);
+          }
+
+          inFlightExecutions.delete(executionKey);
         }
       },
       generateId: generateUUID,
     });
 
-    return createUIMessageStreamResponse({ stream });
+    return createUIMessageStreamResponse({ stream: streamInstance });
   } catch (error) {
     console.error("Critical error in console API:", error);
     return new ChatbotError("offline:chat").toResponse();
