@@ -107,6 +107,13 @@ class AppSettings(BaseSettings):
 	clerk_secret_key: str = Field(default='', alias='CLERK_SECRET_KEY')
 	clerk_domain: str = Field(default='', alias='CLERK_DOMAIN')
 
+	# ── Memory (Engram retention) ───────────────────────────────────────
+	memory_enabled: bool = Field(
+		default=True,
+		alias='MEMORY_ENABLED',
+		description='If False, fully disables Engram/Redis memory (no-op memory client)',
+	)
+
 	@property
 	def credentials(self) -> Credentials:
 		"""Recreate ``Credentials`` from flattened fields.

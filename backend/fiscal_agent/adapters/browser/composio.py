@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 import traceback
 from datetime import datetime
@@ -62,6 +63,13 @@ COMPOSIO_BASE_URL = 'https://backend.composio.dev/api/v3.1/tools/execute'
 COMPOSIO_POLL_INTERVAL = 2  # seconds between WatchTask polls
 COMPOSIO_DEFAULT_TIMEOUT = 300  # seconds per task (5 min max)
 
+# ── Retry / backoff policy ────────────────────────────────────────────────
+# Exponential backoff with jitter between retry attempts:
+#   delay = min(BASE_DELAY * MULTIPLIER**(attempt-1), MAX_DELAY) * uniform(0.5, 1.0)
+BROWSER_RETRY_BASE_DELAY = 5.0  # seconds before the first retry
+BROWSER_RETRY_MAX_DELAY = 60.0  # cap applied to the exponential backoff
+BROWSER_RETRY_MULTIPLIER = 2.0  # growth factor per retry attempt
+
 
 class ComposioError(Exception):
 	"""Error from Composio API or task execution."""
@@ -90,12 +98,16 @@ class ComposioBrowser:
 		estudio_clave: str,
 		headed: bool = False,
 		tenant: Tenant | None = None,
+		default_max_retries: int | None = None,
 	) -> None:
 		self._api_key = composio_api_key
 		self._estudio_cuit = estudio_cuit
 		self._estudio_clave = estudio_clave
 		self._headed = headed
 		self._tenant = tenant
+		# Override for the retry policy: None keeps the per-task defaults
+		# (3 for facilidades / long tasks, 1 otherwise).
+		self._retry_max_attempts = default_max_retries
 		self._http_headers = {
 			'x-api-key': self._api_key,
 			'Content-Type': 'application/json',
@@ -416,17 +428,23 @@ class ComposioBrowser:
 					echo_func(f'  ▶ {task.name}: {cliente.cuit} ...')
 
 				# ── Determinar política de reintento ──────────────────────
-				max_retries = 3 if (task.name == 'facilidades' or task.timeout > 300) else 1
-				retry_delay = 30
+				if self._retry_max_attempts is not None:
+					max_retries = self._retry_max_attempts
+				else:
+					max_retries = 3 if (task.name == 'facilidades' or task.timeout > 300) else 1
 				task_failed = False
 
 				for attempt in range(max_retries):
 					try:
 						if attempt > 0:
+							delay = min(
+								BROWSER_RETRY_BASE_DELAY * (BROWSER_RETRY_MULTIPLIER ** (attempt - 1)),
+								BROWSER_RETRY_MAX_DELAY,
+							) * random.uniform(0.5, 1.0)
 							if echo_func:
 								echo_func(f'  🔄 Reintento {attempt + 1}/{max_retries} tras error transitorio...')
 							logger.warning('Reintentando %s (intento %d/%d)', task.name, attempt + 1, max_retries)
-							await asyncio.sleep(retry_delay)
+							await asyncio.sleep(delay)
 
 						# ── CREATE_TASK ───────────────────────────────────────────
 						create_result = await self._create_task(

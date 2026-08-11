@@ -1,4 +1,13 @@
-"""FiscalMemoryClient — Engram persistence + Redis cache for pipeline results."""
+"""FiscalMemoryClient — Engram persistence + Redis cache for pipeline results.
+
+Retention decision (Phase 4):
+    Engram stays OPTIONAL/local for now — built for pipeline observability,
+    not as the system of record. Setting ``MEMORY_ENABLED=false`` (config field
+    ``memory_enabled``, or the ``enabled`` constructor flag on False) fully
+    disables the client: no Redis client and no Engram HTTP are ever created,
+    and every method becomes a no-op. A formal retention policy is out of scope
+    until a managed memory store is chosen.
+"""
 
 from __future__ import annotations
 
@@ -33,8 +42,9 @@ class FiscalMemoryClient:
 	not transactional guarantees.
 	"""
 
-	def __init__(self, config: MemoryConfig | None = None) -> None:
+	def __init__(self, config: MemoryConfig | None = None, enabled: bool = True) -> None:
 		self.config = config or MemoryConfig()
+		self._enabled = bool(enabled)
 		self._redis: redis.Redis | None = None
 		# Track which CUIT sessions we've already ensured exist.
 		self._session_cache: set[str] = set()
@@ -53,7 +63,7 @@ class FiscalMemoryClient:
 		Idempotent: only POSTs to Engram once per CUIT per client lifetime.
 		"""
 		session_id = self.cuit_session_id(cuit)
-		if session_id in self._session_cache:
+		if not self._enabled or session_id in self._session_cache:
 			return session_id
 
 		try:
@@ -334,8 +344,11 @@ class FiscalMemoryClient:
 	def is_available(self) -> bool:
 		"""Check if Engram is reachable via ``GET /health``.
 
-		Returns ``True`` on a 2xx response, ``False`` otherwise.
+		Returns ``True`` on a 2xx response, ``False`` otherwise. Always ``False``
+		when the client is disabled.
 		"""
+		if not self._enabled:
+			return False
 		try:
 			resp = requests.get(
 				f'{self.config.engram_url}/health',
@@ -359,6 +372,8 @@ class FiscalMemoryClient:
 
 	def _engram_post(self, path: str, data: dict) -> dict | None:
 		"""POST JSON *data* to Engram *path*. Returns parsed JSON or ``None``."""
+		if not self._enabled:
+			return None
 		resp = requests.post(
 			f'{self.config.engram_url}{path}',
 			json=data,
@@ -369,6 +384,8 @@ class FiscalMemoryClient:
 
 	def _engram_get(self, path: str) -> dict | None:
 		"""GET from Engram *path*. Returns parsed JSON or ``None``."""
+		if not self._enabled:
+			return None
 		resp = requests.get(
 			f'{self.config.engram_url}{path}',
 			timeout=self.config.engram_timeout,
@@ -380,6 +397,8 @@ class FiscalMemoryClient:
 
 	def _cache_get(self, key: str) -> str | None:
 		"""Read value from Redis cache. Returns ``None`` if missing or error."""
+		if not self._enabled:
+			return None
 		try:
 			val = self._redis_client.get(key)
 			return val.decode('utf-8') if val is not None else None
@@ -391,6 +410,8 @@ class FiscalMemoryClient:
 
 		Skips write if Redis exceeds the configured memory limit.
 		"""
+		if not self._enabled:
+			return
 		try:
 			if not self._redis_has_space():
 				logger.warning('[memory] ⚠️ Redis cerca del límite de 25MB, saltando cache temporal')

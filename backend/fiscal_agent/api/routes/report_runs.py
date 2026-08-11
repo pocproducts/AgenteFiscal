@@ -134,3 +134,71 @@ async def create_report_run(
 		},
 	)
 
+
+@router.get(
+	'/v1/report-runs/{report_run_id}',
+	response_model=UnifiedResponse[dict],
+	summary='Estado de una corrida de reporte (para polling desde el frontend)',
+)
+async def get_report_run(
+	report_run_id: uuid.UUID,
+	request: Request,
+	session: AsyncSession = Depends(get_db_session),
+) -> UnifiedResponse[dict]:
+	"""Return the current state of a ``report_runs`` row, scoped to the tenant.
+
+	The worker (Fase 3) leaves ``status``, ``steps['progress']``,
+	``result_summary`` and ``error`` on the row as it advances; the frontend
+	polls this endpoint until ``status`` reaches ``done``/``failed``.
+	"""
+	tenant_id = getattr(request.state, 'tenant_id', None)
+	if tenant_id is None:
+		return UnifiedResponse(
+			status='error',
+			error=ApiError(
+				code='UNAUTHENTICATED',
+				cause='No se pudo resolver el tenant autenticado',
+				remediation='Autentícate con un Clerk JWT o API key válida',
+			),
+		)
+
+	try:
+		tenant_uuid = uuid.UUID(str(tenant_id))
+	except (ValueError, TypeError):
+		return UnifiedResponse(
+			status='error',
+			error=ApiError(
+				code='UNAUTHENTICATED',
+				cause='El tenant autenticado no es un UUID válido',
+				remediation='Revisa la sesión / API key utilizada',
+			),
+		)
+
+	run = await session.get(ReportRun, report_run_id)
+
+	# Missing rows and other tenants' runs share the same 404-ish error so we
+	# don't leak whether a given report_run_id exists.
+	if run is None or run.tenant_id != tenant_uuid:
+		return UnifiedResponse(
+			status='error',
+			error=ApiError(
+				code='REPORT_RUN_NOT_FOUND',
+				cause='No existe una corrida de reporte con ese ID para tu tenant',
+				remediation='Verifica el report_run_id e intenta de nuevo',
+			),
+		)
+
+	return UnifiedResponse(
+		status='success',
+		result={
+			'report_run_id': str(run.id),
+			'status': run.status,
+			'cuit': run.cuit,
+			'started_at': run.started_at.isoformat() if run.started_at else None,
+			'finished_at': run.finished_at.isoformat() if run.finished_at else None,
+			'steps': run.steps,
+			'result_summary': run.result_summary,
+			'error': run.error,
+		},
+	)
+

@@ -2,7 +2,12 @@
 
 Reads MCP_TRANSPORT env var:
   - stdio (default): runs via stdin/stdout — local only.
-  - http: wraps mcp.sse_app() in Starlette (auth removed temporarily).
+  - http: wraps mcp.sse_app() in Starlette.
+
+Auth status:
+    MCP STDIO transport: no auth (local only).
+    MCP HTTP transport: auth REMOVED — TODO: re-add bearer/API-key auth
+    before exposing over network.
 """
 
 from __future__ import annotations
@@ -37,9 +42,10 @@ def _run_stdio() -> None:
 
 
 def _run_http() -> None:
-	"""Run MCP server via HTTP/SSE transport (auth removed temporarily).
+	"""Run MCP server via HTTP/SSE transport.
 
-	TODO: agregar autenticación cuando se implemente el nuevo proveedor.
+	Auth status: auth REMOVED — TODO: re-add bearer/API-key auth before
+	exposing this over a network. Local-only for now.
 	"""
 	from fiscal_agent.mcp.server import mcp
 	from starlette.applications import Starlette

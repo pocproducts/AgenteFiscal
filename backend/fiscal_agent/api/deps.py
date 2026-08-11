@@ -50,10 +50,10 @@ def get_pdf_gen() -> PdfGenerator:
 
 
 def get_memory() -> FiscalMemoryClient:
-	"""Return cached FiscalMemoryClient instance (best-effort, never raises)."""
+	"""Return cached FiscalMemoryClient instance (no-op if MEMORY_ENABLED=false)."""
 	global _memory
 	if _memory is None:
-		_memory = FiscalMemoryClient()
+		_memory = FiscalMemoryClient(enabled=get_settings().memory_enabled)
 	return _memory
 
 
