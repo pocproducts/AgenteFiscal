@@ -1,5 +1,5 @@
-import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
+import { z } from "zod";
 import type { ArtifactKind } from "@/components/chat/artifact";
 import {
   deleteDocumentsByIdAfterTimestamp,
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     ).toResponse();
   }
 
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
   if (!userId) {
     return new ChatbotError("unauthorized:document").toResponse();
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
     return new ChatbotError("not_found:document").toResponse();
   }
 
-  if (document.userId !== userId) {
+  if (document.userId !== userId || document.tenantId !== orgId) {
     return new ChatbotError("forbidden:document").toResponse();
   }
 
@@ -59,10 +59,14 @@ export async function POST(request: Request) {
     ).toResponse();
   }
 
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
   if (!userId) {
     return new ChatbotError("not_found:document").toResponse();
+  }
+
+  if (!orgId) {
+    return new ChatbotError("forbidden:document").toResponse();
   }
 
   let content: string;
@@ -88,7 +92,7 @@ export async function POST(request: Request) {
   if (documents.length > 0) {
     const [doc] = documents;
 
-    if (doc.userId !== userId) {
+    if (doc.userId !== userId || doc.tenantId !== orgId) {
       return new ChatbotError("forbidden:document").toResponse();
     }
   }
@@ -104,6 +108,7 @@ export async function POST(request: Request) {
     title,
     kind,
     userId,
+    tenantId: orgId,
   });
 
   return Response.json(document, { status: 200 });
@@ -128,7 +133,7 @@ export async function DELETE(request: Request) {
     ).toResponse();
   }
 
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
   if (!userId) {
     return new ChatbotError("unauthorized:document").toResponse();
@@ -138,7 +143,7 @@ export async function DELETE(request: Request) {
 
   const [document] = documents;
 
-  if (document.userId !== userId) {
+  if (document.userId !== userId || document.tenantId !== orgId) {
     return new ChatbotError("forbidden:document").toResponse();
   }
 

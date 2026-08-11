@@ -3,7 +3,7 @@
 import { Check, Globe, Key, Pencil, Plus, Trash2, Users } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/chat/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { type Profile, useProfiles } from "@/hooks/use-profiles";
 import { useLanguage } from "@/lib/i18n";
+import { interpolate } from "@/lib/utils";
 
 export default function ProfilesSettingsPage() {
   const {
@@ -52,11 +53,14 @@ export default function ProfilesSettingsPage() {
   const handleCreateProfile = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) {
-      toast.error(dict.invalidName);
+      toast({ description: dict.invalidName, type: "error" });
       return;
     }
     const added = addProfile(newName.trim(), selectedDomains);
-    toast.success(dict.profileCreated.replace("{name}", added.name));
+    toast({
+      description: interpolate(dict.profileCreated, { name: added.name }),
+      type: "success",
+    });
     setNewName("");
     setSelectedDomains(["arca.gob.ar"]);
     setIsCreateOpen(false);
@@ -65,28 +69,31 @@ export default function ProfilesSettingsPage() {
   const handleEditProfile = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingName.trim()) {
-      toast.error(dict.nameEmpty);
+      toast({ description: dict.nameEmpty, type: "error" });
       return;
     }
     updateProfileName(editingId, editingName.trim());
-    toast.success(dict.nameUpdated);
+    toast({ description: dict.nameUpdated, type: "success" });
     setIsEditOpen(false);
   };
 
   const handleSetupAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cuitInput.length !== 11) {
-      toast.error(dict.invalidCuit);
+      toast({ description: dict.invalidCuit, type: "error" });
       return;
     }
     if (!passwordInput.trim()) {
-      toast.error(dict.passwordEmpty);
+      toast({ description: dict.passwordEmpty, type: "error" });
       return;
     }
     setIsAuthenticating(true);
     if (authProfile) {
       await setProfileAuth(authProfile.id, true);
-      toast.success(dict.authSet.replace("{name}", authProfile.name));
+      toast({
+        description: interpolate(dict.authSet, { name: authProfile.name }),
+        type: "success",
+      });
     }
     setIsAuthenticating(false);
     setIsAuthOpen(false);
@@ -219,7 +226,10 @@ export default function ProfilesSettingsPage() {
                   className="rounded-lg text-xs flex items-center gap-1 text-destructive hover:bg-destructive/10"
                   onClick={() => {
                     deleteProfile(p.id);
-                    toast.success(dict.profileDeleted);
+                    toast({
+                      description: dict.profileDeleted,
+                      type: "success",
+                    });
                   }}
                   size="sm"
                   variant="ghost"
@@ -277,22 +287,32 @@ export default function ProfilesSettingsPage() {
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground">
+                <label
+                  className="text-xs font-semibold text-muted-foreground"
+                  htmlFor="profile-name"
+                >
                   {dict.profileNameLabel}
                 </label>
                 <Input
                   autoFocus
                   className="rounded-xl"
+                  id="profile-name"
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder={dict.profileNamePlaceholder}
                   value={newName}
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground">
+                <label
+                  className="text-xs font-semibold text-muted-foreground"
+                  htmlFor="cookie-domains"
+                >
                   {dict.cookieDomainsLabel}
                 </label>
-                <div className="grid grid-cols-2 gap-2 mt-1">
+                <div
+                  className="grid grid-cols-2 gap-2 mt-1"
+                  id="cookie-domains"
+                >
                   {AVAILABLE_DOMAINS.map((domain) => {
                     const selected = selectedDomains.includes(domain);
                     return (
@@ -378,12 +398,16 @@ export default function ProfilesSettingsPage() {
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground">
+                <label
+                  className="text-xs font-semibold text-muted-foreground"
+                  htmlFor="cuit-input"
+                >
                   {dict.cuitLabel}
                 </label>
                 <Input
                   className="rounded-xl font-mono"
                   disabled={isAuthenticating}
+                  id="cuit-input"
                   onChange={(e) =>
                     setCuitInput(e.target.value.replace(/\D/g, "").slice(0, 11))
                   }
@@ -392,12 +416,16 @@ export default function ProfilesSettingsPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground">
+                <label
+                  className="text-xs font-semibold text-muted-foreground"
+                  htmlFor="password-input"
+                >
                   {dict.passwordLabel}
                 </label>
                 <Input
                   className="rounded-xl"
                   disabled={isAuthenticating}
+                  id="password-input"
                   onChange={(e) => setPasswordInput(e.target.value)}
                   placeholder="••••••••••••"
                   type="password"

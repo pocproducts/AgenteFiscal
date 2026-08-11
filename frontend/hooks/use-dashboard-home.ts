@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import useSWR from "swr";
 import { useAgentSidebar } from "@/hooks/use-agent-sidebar";
+import { useTenantKey } from "@/hooks/use-tenant-key";
 import {
   buildVolumeSeries,
   deriveKpisFromSessions,
@@ -17,12 +18,11 @@ import type { DashboardHomeSnapshot } from "@/lib/dashboard/types";
  */
 export function useDashboardHome() {
   const { allSessions } = useAgentSidebar();
+  const key = useTenantKey("dashboard-home");
 
-  const { data, error } = useSWR<DashboardHomeSnapshot | null>(
-    "dashboard-home",
-    null,
-    { fallbackData: null }
-  );
+  const { data, error } = useSWR<DashboardHomeSnapshot | null>(key, null, {
+    fallbackData: null,
+  });
 
   const derived = useMemo<DashboardHomeSnapshot | null>(() => {
     if (allSessions.length === 0) {

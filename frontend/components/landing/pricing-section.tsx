@@ -54,6 +54,7 @@ export function PricingSection() {
           <button
             className="relative w-14 h-7 bg-foreground/10 rounded-full p-1 transition-colors hover:bg-foreground/20"
             onClick={() => setIsAnnual(!isAnnual)}
+            type="button"
           >
             <div
               className={`w-5 h-5 bg-foreground rounded-full transition-transform duration-300 ${
@@ -107,7 +108,11 @@ export function PricingSection() {
 
               {/* Price */}
               <div className="mb-8 pb-8 border-b border-foreground/10">
-                {plan.price.monthly !== null ? (
+                {plan.price.monthly === null ? (
+                  <span className="font-display text-4xl text-foreground">
+                    {t.pricing.custom}
+                  </span>
+                ) : (
                   <div className="flex items-baseline gap-2">
                     <span className="font-display text-5xl lg:text-6xl text-foreground">
                       ${isAnnual ? plan.price.annual : plan.price.monthly}
@@ -116,10 +121,6 @@ export function PricingSection() {
                       {t.pricing.perMonth}
                     </span>
                   </div>
-                ) : (
-                  <span className="font-display text-4xl text-foreground">
-                    {t.pricing.custom}
-                  </span>
                 )}
               </div>
 
@@ -143,6 +144,7 @@ export function PricingSection() {
                       ? "bg-foreground text-primary-foreground hover:bg-foreground/90"
                       : "border border-foreground/20 text-foreground hover:border-foreground hover:bg-foreground/5"
                   }`}
+                  type="button"
                 >
                   {plan.cta}
                   <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
@@ -157,7 +159,7 @@ export function PricingSection() {
           {t.pricing.bottomNote}{" "}
           <a
             className="underline underline-offset-4 hover:text-foreground transition-colors"
-            href="#"
+            href="#features"
           >
             {t.pricing.compareFeatures}
           </a>

@@ -6,14 +6,12 @@ import {
   Instrument_Serif,
   JetBrains_Mono,
 } from "next/font/google";
+import { Suspense } from "react";
+import { ClerkLocaleProvider } from "@/components/auth/clerk-locale-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LanguageProvider } from "@/lib/i18n";
-
-import { Suspense } from "react";
 import "./globals.css";
-import { ClerkProvider } from "@clerk/nextjs";
-import { esES } from "@clerk/localizations";
 
 // Static metadata in the default (es) locale. The client-side LanguageProvider
 // updates `document.title` when the user toggles EN/ES, so we avoid reading
@@ -107,18 +105,18 @@ export default async function RootLayout({
     >
       <head>
         <script
-          suppressHydrationWarning
           // biome-ignore lint/security/noDangerouslySetInnerHtml: "Required"
           dangerouslySetInnerHTML={{
             __html: THEME_COLOR_SCRIPT,
           }}
+          suppressHydrationWarning
         />
         <script
-          suppressHydrationWarning
           // biome-ignore lint/security/noDangerouslySetInnerHtml: "Required"
           dangerouslySetInnerHTML={{
             __html: LOCALE_SCRIPT,
           }}
+          suppressHydrationWarning
         />
       </head>
       <body className="font-sans antialiased">
@@ -129,12 +127,11 @@ export default async function RootLayout({
           enableSystem
         >
           <Suspense fallback={null}>
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            <ClerkProvider localization={esES as any}>
-              <LanguageProvider initialLocale="es">
+            <LanguageProvider initialLocale="es">
+              <ClerkLocaleProvider>
                 <TooltipProvider>{children}</TooltipProvider>
-              </LanguageProvider>
-            </ClerkProvider>
+              </ClerkLocaleProvider>
+            </LanguageProvider>
           </Suspense>
         </ThemeProvider>
       </body>

@@ -12,6 +12,12 @@
   "files": {
     "includes": [
       "**/*",
+      "!**/node_modules",
+      "!**/.next",
+      "!**/test-results",
+      "!**/playwright-report",
+      "!**/coverage",
+      "!**/.data",
       "!components/ai-elements",
       "!components/elements",
       "!components/ui",
@@ -25,7 +31,11 @@
         "noExplicitAny": "off",
         "noUnknownAtRules": "off",
         "noConsole": "off",
-        "noBitwiseOperators": "off"
+        "noBitwiseOperators": "off",
+        // Index keys are safe in static, order-stable decorative arrays
+        // (hero grid lines, code-line/char reveals, marquees, testimonial dots).
+        // Content-based keys risk duplicate collisions on repeated values.
+        "noArrayIndexKey": "off"
       },
       "style": {
         "noMagicNumbers": "off",

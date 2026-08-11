@@ -1,3 +1,13 @@
+// Canonical error contract for all `app/(chat)/api/*` routes: every failure
+// response is `{ code: "type:surface", message, cause? }` built via
+// `new ChatbotError(code, cause).toResponse()`. Clients (fetcher,
+// fetchWithErrorHandlers in lib/utils.ts) read `{ code, cause }` back into a
+// ChatbotError. HTTP status is derived from `type` (see getStatusCodeByType):
+//   bad_request=400  unauthorized=401  forbidden=403  not_found=404
+//   rate_limit=429   offline=503       (unmapped types fall back to 500)
+// `surface` identifies the domain/route family for logging and message
+// selection; `database` surface always logs server-side and returns a
+// generic message (never leaks query/cause details to the client).
 type ErrorType =
   | "bad_request"
   | "unauthorized"

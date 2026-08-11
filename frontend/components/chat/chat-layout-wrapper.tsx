@@ -7,7 +7,9 @@ import { ActiveChatProvider } from "@/hooks/use-active-chat";
 
 export function ChatLayoutWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isChatRoute = pathname === "/" || pathname === "/chat" || pathname.startsWith("/chat/");
+  // Bare "/chat" is the dashboard (see app/(chat)/chat/page.tsx) — only an
+  // actual conversation id mounts the chat shell.
+  const isChatRoute = pathname.startsWith("/chat/");
 
   if (!isChatRoute) {
     return <>{children}</>;

@@ -17,7 +17,7 @@ import {
 import type { AgentSession, AgentTask } from "@/hooks/use-agent-sidebar";
 import { useAgentSidebar } from "@/hooks/use-agent-sidebar";
 import { useLanguage } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { cn, interpolate } from "@/lib/utils";
 
 // ── Tool URL mapping for the embedded browser ─────────────────────────────────
 
@@ -72,18 +72,26 @@ function getToolMeta(toolName: string) {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 function formatDuration(ms?: number): string {
-  if (!ms) return "—";
-  if (ms < 1000) return `${ms}ms`;
+  if (!ms) {
+    return "—";
+  }
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function formatCost(cents: number): string {
-  if (cents === 0) return "$0.00";
+  if (cents === 0) {
+    return "$0.00";
+  }
   return `$${(cents / 100).toFixed(4)}`;
 }
 
 function sessionElapsed(session: AgentSession): string {
-  if (!session.startedAt) return "—";
+  if (!session.startedAt) {
+    return "—";
+  }
   const end = session.completedAt ?? Date.now();
   return formatDuration(end - session.startedAt);
 }
@@ -309,10 +317,12 @@ function SessionPanel({ session }: { session: AgentSession }) {
         )}
         <span>
           {isRunning &&
-            agent.runningTasksDone
-              .replace("{completed}", String(completedTasks))
-              .replace("{done}", completedTasks === 1 ? "" : "s")}
-          {isCompleted && agent.completedTasks.replace("{total}", String(totalTasks))}
+            interpolate(agent.runningTasksDone, {
+              completed: completedTasks,
+              done: completedTasks === 1 ? "" : "s",
+            })}
+          {isCompleted &&
+            interpolate(agent.completedTasks, { total: totalTasks })}
           {session.status === "idle" && agent.waitingToStart}
         </span>
       </div>

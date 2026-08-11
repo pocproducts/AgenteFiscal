@@ -6,8 +6,9 @@ import { Toaster } from "sonner";
 import { AppSidebar } from "@/components/chat/app-sidebar";
 import { ChatLayoutWrapper } from "@/components/chat/chat-layout-wrapper";
 import { DataStreamProvider } from "@/components/chat/data-stream-provider";
-import type { PanelUser } from "@/lib/shared/db-types";
+import { PanelTopbar } from "@/components/chat/panel-topbar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import type { PanelUser } from "@/lib/shared/db-types";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -55,7 +56,10 @@ async function SidebarShell({ children }: { children: React.ReactNode }) {
               "!bg-card !text-foreground !border-border/50 !shadow-[var(--shadow-float)]",
           }}
         />
-        <ChatLayoutWrapper>{children}</ChatLayoutWrapper>
+        <PanelTopbar />
+        <div className="flex min-h-0 flex-1 flex-col">
+          <ChatLayoutWrapper>{children}</ChatLayoutWrapper>
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );

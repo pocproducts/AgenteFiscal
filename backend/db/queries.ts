@@ -94,7 +94,19 @@ function loadState(): MockState {
   }
   try {
     const raw = readFileSync(DB_PATH, "utf8");
-    return reviveDates({ ...EMPTY_STATE(), ...(JSON.parse(raw) as MockState) });
+    const state = reviveDates({
+      ...EMPTY_STATE(),
+      ...(JSON.parse(raw) as MockState),
+    });
+    // Ephemeral history: clear all chat/report history on every server boot so
+    // the panel always starts empty. Auth/tenants are preserved; the history
+    // will be owned by the real backend once the migration starts.
+    state.chats = [];
+    state.messages = [];
+    state.votes = [];
+    state.documents = [];
+    state.suggestions = [];
+    return state;
   } catch (_error) {
     // Corrupt or unreadable mock file: start fresh instead of crashing the app.
     return EMPTY_STATE();
@@ -115,13 +127,17 @@ const { users, chats, messages, votes, documents, suggestions, tenants, tenantMe
 export async function saveChat({
   id,
   userId,
+  tenantId,
   title,
   visibility,
+  status,
 }: {
   id: string;
   userId: string;
+  tenantId: string;
   title: string;
   visibility: VisibilityType;
+  status: "running" | "done";
 }) {
   await Promise.resolve();
   try {
@@ -129,8 +145,10 @@ export async function saveChat({
       id,
       createdAt: new Date(),
       userId,
+      tenantId,
       title,
       visibility: visibility as "public" | "private",
+      status,
     };
     chats.push(newChat);
     persistState();
@@ -140,10 +158,18 @@ export async function saveChat({
   }
 }
 
-export async function deleteAllChatsByUserId({ userId }: { userId: string }) {
+export async function deleteAllChatsByUserId({
+  userId,
+  tenantId,
+}: {
+  userId: string;
+  tenantId: string;
+}) {
   await Promise.resolve();
   try {
-    const userChats = chats.filter((c) => c.userId === userId);
+    const userChats = chats.filter(
+      (c) => c.userId === userId && c.tenantId === tenantId
+    );
     const chatIds = userChats.map((c) => c.id);
 
     // Delete associated votes
@@ -163,7 +189,7 @@ export async function deleteAllChatsByUserId({ userId }: { userId: string }) {
     // Delete chats
     let deletedCount = 0;
     for (let i = chats.length - 1; i >= 0; i--) {
-      if (chats[i].userId === userId) {
+      if (chats[i].userId === userId && chats[i].tenantId === tenantId) {
         chats.splice(i, 1);
         deletedCount++;
       }
@@ -181,18 +207,22 @@ export async function deleteAllChatsByUserId({ userId }: { userId: string }) {
 
 export async function getChatsByUserId({
   id,
+  tenantId,
   limit,
   startingAfter,
   endingBefore,
 }: {
   id: string;
+  tenantId: string;
   limit: number;
   startingAfter: string | null;
   endingBefore: string | null;
 }) {
   await Promise.resolve();
   try {
-    let filteredChats = chats.filter((c) => c.userId === id);
+    let filteredChats = chats.filter(
+      (c) => c.userId === id && c.tenantId === tenantId
+    );
 
     // Sort by createdAt descending
     filteredChats.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -278,6 +308,51 @@ export async function getMessagesByChatId({ id }: { id: string }) {
   }
 }
 
+export async function markChatMailSent({
+  chatId,
+  email,
+}: {
+  chatId: string;
+  email: string;
+}): Promise<boolean> {
+  await Promise.resolve();
+  try {
+    let changed = false;
+    for (const msg of messages) {
+      if (msg.chatId !== chatId || msg.role !== "assistant") {
+        continue;
+      }
+      const parts = msg.parts as Array<{ type: string; text?: unknown }>;
+      if (!Array.isArray(parts)) {
+        continue;
+      }
+      for (const part of parts) {
+        if (
+          part?.type === "text" &&
+          typeof part.text === "string" &&
+          part.text.includes("[MAIL_INPUT_REPLACEMENT]")
+        ) {
+          part.text = part.text.replaceAll(
+            "[MAIL_INPUT_REPLACEMENT]",
+            `[MAIL_SENT:${email}]`
+          );
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      persistState();
+      return true;
+    }
+    return false;
+  } catch (_error) {
+    throw new ChatbotError(
+      "bad_request:database",
+      "Failed to mark chat mail sent"
+    );
+  }
+}
+
 export async function voteMessage({
   chatId,
   messageId,
@@ -328,12 +403,14 @@ export async function saveDocument({
   kind,
   content,
   userId,
+  tenantId,
 }: {
   id: string;
   title: string;
   kind: ArtifactKind;
   content: string;
   userId: string;
+  tenantId: string;
 }) {
   await Promise.resolve();
   try {
@@ -343,6 +420,7 @@ export async function saveDocument({
       kind: kind as any,
       content,
       userId,
+      tenantId,
       createdAt: new Date(),
     };
     documents.push(newDoc);
@@ -583,6 +661,48 @@ export async function updateChatTitleById({
     const chat = chats.find((c) => c.id === chatId);
     if (chat) {
       chat.title = title;
+      persistState();
+      return [chat];
+    }
+    return [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+export async function updateChatStatusById({
+  chatId,
+  status,
+}: {
+  chatId: string;
+  status: "running" | "done";
+}) {
+  await Promise.resolve();
+  try {
+    const chat = chats.find((c) => c.id === chatId);
+    if (chat) {
+      chat.status = status;
+      persistState();
+      return [chat];
+    }
+    return [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+export async function saveChatActivity({
+  chatId,
+  activity,
+}: {
+  chatId: string;
+  activity: unknown;
+}) {
+  await Promise.resolve();
+  try {
+    const chat = chats.find((c) => c.id === chatId);
+    if (chat) {
+      chat.agentActivity = activity;
       persistState();
       return [chat];
     }

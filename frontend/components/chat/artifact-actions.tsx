@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/chat/toast";
 import { useLanguage } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
@@ -77,7 +77,10 @@ function PureArtifactActions({
                   try {
                     await Promise.resolve(action.onClick(actionContext));
                   } catch (_error) {
-                    toast.error(t.panel.chat.artifactActions.failedToExecute);
+                    toast({
+                      description: t.panel.chat.artifactActions.failedToExecute,
+                      type: "error",
+                    });
                   } finally {
                     setIsLoading(false);
                   }

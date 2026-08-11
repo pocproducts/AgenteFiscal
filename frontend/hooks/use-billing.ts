@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import useSWR from "swr";
+import { useTenantKey } from "@/hooks/use-tenant-key";
 import type { BillingPlanId, BillingState } from "@/lib/billing/types";
 
 /**
@@ -22,8 +23,9 @@ const ZERO_BILLING_STATE: BillingState = {
 type BillingFetcher = (key: string) => BillingState | Promise<BillingState>;
 
 export function useBilling(fetcher?: BillingFetcher) {
+  const key = useTenantKey("billing-state");
   const { data, isLoading, error, mutate } = useSWR<BillingState | null>(
-    "billing-state",
+    key,
     fetcher ?? null,
     { fallbackData: null }
   );

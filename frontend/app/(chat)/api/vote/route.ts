@@ -1,5 +1,5 @@
-import { z } from "zod";
 import { auth } from "@clerk/nextjs/server";
+import { z } from "zod";
 import { getChatById, getVotesByChatId, voteMessage } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
 
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     ).toResponse();
   }
 
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
   if (!userId) {
     return new ChatbotError("unauthorized:vote").toResponse();
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
     return new ChatbotError("not_found:chat").toResponse();
   }
 
-  if (chat.userId !== userId) {
+  if (chat.userId !== userId || chat.tenantId !== orgId) {
     return new ChatbotError("forbidden:vote").toResponse();
   }
 
@@ -58,7 +58,7 @@ export async function PATCH(request: Request) {
     ).toResponse();
   }
 
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
   if (!userId) {
     return new ChatbotError("unauthorized:vote").toResponse();
@@ -70,7 +70,7 @@ export async function PATCH(request: Request) {
     return new ChatbotError("not_found:vote").toResponse();
   }
 
-  if (chat.userId !== userId) {
+  if (chat.userId !== userId || chat.tenantId !== orgId) {
     return new ChatbotError("forbidden:vote").toResponse();
   }
 

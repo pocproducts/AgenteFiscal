@@ -1,7 +1,7 @@
-import { toast } from "sonner";
 import { Artifact } from "@/components/chat/create-artifact";
 import { CopyIcon, RedoIcon, UndoIcon } from "@/components/chat/icons";
 import { ImageEditor } from "@/components/chat/image-editor";
+import { toast } from "@/components/chat/toast";
 
 export const imageArtifact = new Artifact({
   kind: "image",
@@ -68,7 +68,7 @@ export const imageArtifact = new Artifact({
           }, "image/png");
         };
 
-        toast.success("Copied image to clipboard!");
+        toast({ description: "Copied image to clipboard!", type: "success" });
       },
     },
   ],

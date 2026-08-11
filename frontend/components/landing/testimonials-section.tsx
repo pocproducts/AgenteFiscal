@@ -105,6 +105,8 @@ export function TestimonialsSection() {
             <div className="flex gap-2 mt-8">
               {testimonials.map((_, idx) => (
                 <button
+                  aria-label={`Go to testimonial ${idx + 1}`}
+                  aria-selected={idx === activeIndex}
                   className={`h-2 transition-all duration-300 ${
                     idx === activeIndex
                       ? "w-8 bg-foreground"
@@ -118,6 +120,8 @@ export function TestimonialsSection() {
                       setIsAnimating(false);
                     }, 300);
                   }}
+                  role="tab"
+                  type="button"
                 />
               ))}
             </div>

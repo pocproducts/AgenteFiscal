@@ -42,6 +42,8 @@ export function CtaSection() {
       ref={sectionRef}
     >
       <div className="max-w-[1400px] mx-auto px-6 lg:px-12">
+        {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: decorative mouse-tracking spotlight on the CTA panel; content within remains non-interactive and fully visible. */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: decorative mouse-tracking spotlight on the CTA panel; content within remains non-interactive and fully visible. */}
         <div
           className={`relative border border-foreground transition-all duration-1000 ${
             isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"

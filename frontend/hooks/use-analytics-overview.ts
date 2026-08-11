@@ -1,6 +1,7 @@
 "use client";
 
 import useSWR from "swr";
+import { useTenantKey } from "@/hooks/use-tenant-key";
 import type { OverviewSnapshot, RangeKey } from "@/lib/analytics/types";
 
 type OverviewFetcher = (
@@ -16,9 +17,8 @@ export function useAnalyticsOverview(
   range: RangeKey,
   fetcher?: OverviewFetcher
 ) {
-  return useSWR<OverviewSnapshot | null>(
-    `analytics-overview:${range}`,
-    fetcher ?? null,
-    { fallbackData: null }
-  );
+  const key = useTenantKey(`analytics-overview:${range}`);
+  return useSWR<OverviewSnapshot | null>(key, fetcher ?? null, {
+    fallbackData: null,
+  });
 }

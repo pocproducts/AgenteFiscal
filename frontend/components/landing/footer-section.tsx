@@ -64,7 +64,7 @@ export function FooterSection() {
           <div className="grid grid-cols-2 md:grid-cols-6 gap-12 lg:gap-8">
             {/* Brand Column */}
             <div className="col-span-2">
-              <a className="inline-flex items-center gap-2 mb-6" href="#">
+              <a className="inline-flex items-center gap-2 mb-6" href="/">
                 <span className="text-2xl font-display">Optimus</span>
                 <span className="text-xs text-muted-foreground font-mono">
                   TM

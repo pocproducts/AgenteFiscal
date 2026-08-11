@@ -2,15 +2,22 @@
 
 import { useCallback, useMemo } from "react";
 import useSWR from "swr";
-import type { AgentSession, AgentTask } from "@/lib/ai/tools/agent-execution";
+import { useTenantKey } from "@/hooks/use-tenant-key";
 import {
+  type AgentSession,
+  type AgentSessionSnapshot,
+  type AgentTask,
   buildSubtasksForTool,
   generateAgentId,
 } from "@/lib/ai/tools/agent-execution";
 
 // ── State ────────────────────────────────────────────────────────────────────
 
-export type { AgentSession, AgentTask };
+export type {
+  AgentSession,
+  AgentSessionSnapshot,
+  AgentTask,
+} from "@/lib/ai/tools/agent-execution";
 
 export type AgentSidebarState = {
   isOpen: boolean;
@@ -29,8 +36,9 @@ const initialAgentSidebarState: AgentSidebarState = {
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useAgentSidebar() {
+  const key = useTenantKey("agent-sidebar");
   const { data: localState, mutate: setLocalState } = useSWR<AgentSidebarState>(
-    "agent-sidebar",
+    key,
     null,
     { fallbackData: initialAgentSidebarState }
   );
@@ -92,7 +100,9 @@ export function useAgentSidebar() {
       setLocalState((prev) => {
         const current = prev ?? initialAgentSidebarState;
         const session = current.sessions[agentId];
-        if (!session) return current;
+        if (!session) {
+          return current;
+        }
 
         const tasks = session.tasks.map((t) =>
           t.id === taskId ? { ...t, ...patch } : t
@@ -125,7 +135,9 @@ export function useAgentSidebar() {
       setLocalState((prev) => {
         const current = prev ?? initialAgentSidebarState;
         const session = current.sessions[agentId];
-        if (!session) return current;
+        if (!session) {
+          return current;
+        }
 
         return {
           ...current,
@@ -148,6 +160,50 @@ export function useAgentSidebar() {
     }));
   }, [setLocalState]);
 
+  // ── Hydrate completed sessions from a chat's persisted activity ───────────
+  // Restores the monitor after a reload. Merges into the existing sessions map
+  // so live in-memory sessions are never wiped. Leaves the sidebar closed; the
+  // tabs/count reflect allSessions once the monitor is opened.
+
+  const hydrate = useCallback(
+    (chatId: string, activity: AgentSessionSnapshot[]) => {
+      setLocalState((prev) => {
+        const current = prev ?? initialAgentSidebarState;
+        const sessions = { ...current.sessions };
+
+        for (const snapshot of activity) {
+          const agentId =
+            snapshot.agentId ||
+            `agent-${chatId.slice(0, 8)}-${snapshot.toolKey}`;
+          const existing = sessions[agentId];
+
+          const tasks: AgentTask[] = snapshot.tasks.map((t) => ({
+            id: t.id,
+            label: t.label,
+            status: t.status ?? "completed",
+            durationMs: t.durationMs,
+            costCents: t.costCents,
+          }));
+
+          sessions[agentId] = {
+            ...existing,
+            agentId,
+            toolName: snapshot.toolName,
+            messageId: existing?.messageId ?? "",
+            status: "completed",
+            tasks,
+            startedAt: snapshot.startedAt,
+            completedAt: snapshot.completedAt,
+            totalCostCents: snapshot.totalCostCents,
+          };
+        }
+
+        return { ...current, sessions };
+      });
+    },
+    [setLocalState]
+  );
+
   // ── Derived helpers ───────────────────────────────────────────────────────
 
   const activeSession = state.activeAgentId
@@ -165,6 +221,7 @@ export function useAgentSidebar() {
       sessions: state.sessions,
       open,
       close,
+      hydrate,
       setActiveAgent,
       updateTask,
       updateSession,
@@ -177,6 +234,7 @@ export function useAgentSidebar() {
       state.sessions,
       open,
       close,
+      hydrate,
       setActiveAgent,
       updateTask,
       updateSession,

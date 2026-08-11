@@ -18,8 +18,8 @@ import {
   useArtifact,
   useArtifactSelector,
 } from "@/hooks/use-artifact";
-import type { Attachment, ChatMessage } from "@/lib/types";
 import { useLanguage } from "@/lib/i18n";
+import type { Attachment, ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AgentSidebar } from "./agent-sidebar";
 import { Artifact } from "./artifact";
@@ -43,6 +43,7 @@ export function ChatShell() {
     visibilityType,
     isReadonly,
     isLoading,
+    hasPendingLaunch,
     votes,
     currentModelId,
     setCurrentModelId,
@@ -50,7 +51,7 @@ export function ChatShell() {
     setShowCreditCardAlert,
   } = useActiveChat();
 
-  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
+  const [_editingMessage, setEditingMessage] = useState<ChatMessage | null>(
     null
   );
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -84,7 +85,7 @@ export function ChatShell() {
 
   return (
     <>
-      <div className="flex h-dvh w-full flex-row overflow-hidden">
+      <div className="flex h-[calc(100dvh-3rem)] w-full flex-row overflow-hidden">
         <div
           className={cn(
             "flex min-w-0 flex-col bg-sidebar transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
@@ -105,6 +106,7 @@ export function ChatShell() {
             <Messages
               addToolApprovalResponse={addToolApprovalResponse}
               chatId={chatId}
+              hasPendingLaunch={hasPendingLaunch}
               isArtifactVisible={isArtifactVisible || isAgentSidebarOpen}
               isLoading={isLoading}
               isReadonly={isReadonly}
@@ -118,8 +120,6 @@ export function ChatShell() {
                 setEditingMessage(msg);
               }}
               regenerate={regenerate}
-              selectedModelId={currentModelId}
-              sendMessage={sendMessage}
               setMessages={setMessages}
               status={status}
               votes={votes}
@@ -147,22 +147,10 @@ export function ChatShell() {
         </div>
 
         <Artifact
-          addToolApprovalResponse={addToolApprovalResponse}
-          attachments={attachments}
-          chatId={chatId}
-          input={input}
-          isReadonly={isReadonly}
-          messages={messages}
-          regenerate={regenerate}
-          selectedModelId={currentModelId}
-          selectedVisibilityType={visibilityType}
           sendMessage={sendMessage}
-          setAttachments={setAttachments}
-          setInput={setInput}
           setMessages={setMessages}
           status={status}
           stop={stop}
-          votes={votes}
         />
 
         {isAgentSidebarOpen && !isArtifactVisible && <AgentSidebar />}
@@ -174,7 +162,7 @@ export function ChatShell() {
         onOpenChange={setShowCreditCardAlert}
         open={showCreditCardAlert}
       >
-<AlertDialogContent>
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{shell.activateTitle}</AlertDialogTitle>
             <AlertDialogDescription>

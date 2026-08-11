@@ -6,6 +6,7 @@ import { unstable_serialize } from "swr/infinite";
 import type { AgentTask } from "@/hooks/use-agent-sidebar";
 import { useAgentSidebar } from "@/hooks/use-agent-sidebar";
 import { initialArtifactData, useArtifact } from "@/hooks/use-artifact";
+import { useTenantKey } from "@/hooks/use-tenant-key";
 import { artifactDefinitions } from "./artifact";
 import { useDataStream } from "./data-stream-provider";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
@@ -22,6 +23,10 @@ export function DataStreamHandler() {
 
   const { artifact, setArtifact, setMetadata } = useArtifact();
   const { updateTask, updateSession } = useAgentSidebar();
+  // Must match the key useAgentSidebar() reads from (hooks/use-agent-sidebar.ts)
+  // — mutating a different key here would silently write into a cache slot
+  // updateTask/updateSession never look at.
+  const agentSidebarKey = useTenantKey("agent-sidebar");
 
   useEffect(() => {
     if (!dataStream?.length) {
@@ -42,7 +47,7 @@ export function DataStreamHandler() {
       // Note: custom data-agent-* types are not part of the SDK union; cast through any.
       const anyDelta = delta as any;
 
-      if (anyDelta.type === "data-agent-session-start") {
+      if (anyDelta.type === "data-agent-session-start" && agentSidebarKey) {
         const { agentId, toolName, profileId, tasks } = anyDelta.data as {
           agentId: string;
           toolName: string;
@@ -52,7 +57,7 @@ export function DataStreamHandler() {
         };
 
         mutate(
-          "agent-sidebar",
+          agentSidebarKey,
           (prev: any) => {
             const current = prev ?? {
               isOpen: false,
@@ -186,6 +191,7 @@ export function DataStreamHandler() {
     mutate,
     updateTask,
     updateSession,
+    agentSidebarKey,
   ]);
 
   return null;

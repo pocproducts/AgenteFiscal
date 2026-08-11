@@ -35,7 +35,7 @@ export function SidebarUserNav({ user }: { user: PanelUser }) {
   const { setTheme, resolvedTheme } = useTheme();
   const menu = t.panel.sidebar.userMenu;
 
-  const email =
+  const _email =
     clerkUser?.emailAddresses?.[0]?.emailAddress ?? user.email ?? "";
 
   return (
@@ -43,19 +43,7 @@ export function SidebarUserNav({ user }: { user: PanelUser }) {
       <SidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            {!isLoaded ? (
-              <SidebarMenuButton className="h-10 justify-between rounded-lg bg-transparent text-sidebar-foreground/50 transition-colors duration-150 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground">
-                <div className="flex flex-row items-center gap-2">
-                  <div className="size-6 animate-pulse rounded-full bg-sidebar-foreground/10" />
-                  <span className="animate-pulse rounded-md bg-sidebar-foreground/10 text-transparent text-[13px]">
-                    {t.panel.sidebar.loading}
-                  </span>
-                </div>
-                <div className="animate-spin text-sidebar-foreground/50">
-                  <LoaderIcon />
-                </div>
-              </SidebarMenuButton>
-            ) : (
+            {isLoaded ? (
               <SidebarMenuButton
                 className="h-8 px-2 rounded-lg bg-transparent text-sidebar-foreground/70 transition-colors duration-150 hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                 data-testid="user-nav-button"
@@ -70,6 +58,18 @@ export function SidebarUserNav({ user }: { user: PanelUser }) {
                   {user?.email}
                 </span>
                 <ChevronUp className="ml-auto size-3.5 text-sidebar-foreground/50" />
+              </SidebarMenuButton>
+            ) : (
+              <SidebarMenuButton className="h-10 justify-between rounded-lg bg-transparent text-sidebar-foreground/50 transition-colors duration-150 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground">
+                <div className="flex flex-row items-center gap-2">
+                  <div className="size-6 animate-pulse rounded-full bg-sidebar-foreground/10" />
+                  <span className="animate-pulse rounded-md bg-sidebar-foreground/10 text-transparent text-[13px]">
+                    {t.panel.sidebar.loading}
+                  </span>
+                </div>
+                <div className="animate-spin text-sidebar-foreground/50">
+                  <LoaderIcon />
+                </div>
               </SidebarMenuButton>
             )}
           </DropdownMenuTrigger>
@@ -103,7 +103,9 @@ export function SidebarUserNav({ user }: { user: PanelUser }) {
                     return;
                   }
 
-                  void signOut({ redirectUrl: "/" });
+                  signOut({ redirectUrl: "/" }).catch(() => {
+                    // Ignore sign-out errors — the redirect still proceeds.
+                  });
                 }}
                 type="button"
               >

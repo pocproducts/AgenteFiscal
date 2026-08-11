@@ -1,15 +1,18 @@
+import { auth } from "@clerk/nextjs/server";
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
   generateId,
 } from "ai";
-import { auth } from "@clerk/nextjs/server";
+import type { AgentSessionSnapshot } from "@/lib/ai/tools/agent-execution";
 import { buildSubtasksForTool } from "@/lib/ai/tools/agent-execution";
 import { FISCAL_COMMAND_MAP } from "@/lib/ai/tools/fiscal-tools";
 import {
   getChatById,
   saveChat,
+  saveChatActivity,
   saveMessages,
+  updateChatStatusById,
   updateChatTitleById,
 } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
@@ -20,6 +23,13 @@ export const maxDuration = 60;
 // ─── Mock delay config ────────────────────────────────────────────────────────
 // 5 000 ms total per tool. Tasks share the budget proportionally.
 const TOOL_MOCK_DELAY_MS = 5000;
+
+// In-flight dedupe: the client (or a StrictMode double-effect / double click)
+// can fire the same launch request twice. A second execution of the identical
+// chat+message would duplicate every tool, agent session, and persisted
+// message. Track executions per chatId+message signature and short-circuit
+// duplicates with a no-op stream (no chunks -> nothing is appended client-side).
+const inFlightExecutions = new Map<string, true>();
 
 function generateAgentId(): string {
   return `agent-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -46,15 +56,21 @@ export async function POST(request: Request) {
     ? [singularMessage]
     : initialMessages || [];
 
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
   if (!userId) {
     return new ChatbotError("unauthorized:chat").toResponse();
   }
 
+  if (!orgId) {
+    return new ChatbotError("forbidden:auth").toResponse();
+  }
+
   try {
     const message = uiMessages.at(-1);
-    if (!message) return new ChatbotError("bad_request:api").toResponse();
+    if (!message) {
+      return new ChatbotError("bad_request:api").toResponse();
+    }
 
     // Persist initial message for chat history
     if (uiMessages.length === 1 && userId) {
@@ -79,8 +95,10 @@ export async function POST(request: Request) {
           await saveChat({
             id,
             userId,
+            tenantId: orgId,
             title,
             visibility,
+            status: "running",
           });
         }
 
@@ -125,227 +143,314 @@ export async function POST(request: Request) {
     if (fiscalMatch && cuit) {
       console.log("FISCAL CONSOLE EXECUTION - CUIT:", cuit);
 
+      const executionKey = `${id}:${userText}`;
+      if (inFlightExecutions.has(executionKey)) {
+        console.log("Duplicate fiscal execution skipped:", executionKey);
+        // No-op stream: no chunks -> the client appends nothing, so no
+        // duplicated tools/sessions/messages reach the UI.
+        const noopStream = createUIMessageStream({
+          // Intentionally empty: a no-op stream appends nothing client-side.
+          execute: async () => {
+            await Promise.resolve();
+          },
+          generateId: generateUUID,
+        });
+        return createUIMessageStreamResponse({ stream: noopStream });
+      }
+      inFlightExecutions.set(executionKey, true);
+
       const streamInstance = createUIMessageStream({
         originalMessages: isToolApprovalFlow ? uiMessages : undefined,
         execute: async ({ writer: dataStream }) => {
-          const textPartId = generateId();
-          dataStream.write({ type: "text-start", id: textPartId });
+          try {
+            const textPartId = generateId();
+            dataStream.write({ type: "text-start", id: textPartId });
 
-          const commandsSection = fiscalMatch[2] ?? "";
-          let commandNames = (
-            commandsSection.match(/\/([^/]+?)(?=\s*\/|$)/g) ?? []
-          ).map((c: any) => c.slice(1).trim().toLowerCase());
+            const commandsSection = fiscalMatch[2] ?? "";
+            let commandNames = (
+              commandsSection.match(/\/([^/]+?)(?=\s*\/|$)/g) ?? []
+            ).map((c: any) => c.slice(1).trim().toLowerCase());
 
-          // Macro expansion for /todo
-          if (commandNames.includes("todo")) {
-            commandNames = [
-              "consultaarca",
-              "sistemaregistral",
-              "misfacilidades",
-              "deudavencimientos",
-              "rentascordoba",
-              "calendariovencimientosarca",
-              "informefiscal",
-              "enviarmail",
-            ];
-          }
-
-          const LABEL_MAP: Record<string, string> = {
-            consultaarca: "ConsultaArca",
-            sistemaregistral: "SistemaRegistral",
-            misfacilidades: "MisFacilidades",
-            deudavencimientos: "DeudaVencimientos",
-            rentascordoba: "RentasCordoba",
-            calendariovencimientosarca: "CalendarioVencimientosArca",
-            informefiscal: "📖 InformeFiscal",
-            enviarmail: "EnviarMail",
-          };
-
-          const formatSummary = (cmd: string, data: any) => {
-            switch (cmd) {
-              case "consultaarca":
-                return `**Denominación**: ${data.denominacion}\n- **Condición**: ${data.condicionFiscal}\n- **Impuestos**: ${data.obligaciones.map((o: any) => `${o.impuesto} (${o.estado})`).join(", ")}`;
-              case "sistemaregistral":
-                return `**Razón Social**: ${data.razonSocial}\n- **Actividad**: ${data.actividadPrincipal.descripcion}\n- **Domicilio**: ${data.domicilioFiscal.calle} ${data.domicilioFiscal.numero}, ${data.domicilioFiscal.localidad}`;
-              case "misfacilidades":
-                return data.planesActivos.length > 0
-                  ? `**Planes Activos**: ${data.planesActivos.map((p: any) => `${p.regimen} (${p.estadoPlan})`).join(", ")}`
-                  : "No hay planes de pago activos.";
-              case "deudavencimientos":
-                return `**Saldo Total**: $${data.saldoTotal}\n- **Deudas Vencidas**: ${data.deudasVencidas.length}\n- **Próximo Vencimiento**: ${data.proximoVencimiento}`;
-              case "rentascordoba":
-                return `**Inscripción**: ${data.inscripcionIIBB.tipo}\n- **Estado**: ${data.inscripcionIIBB.estado}\n- **Saldo a Favor**: $${data.declaracionesJuradas.saldoAFavor}`;
-              case "calendariovencimientosarca":
-                return `**Periodo**: ${data.periodo}\n- **Vencimientos Próximos**: ${data.vencimientos
-                  .slice(0, 3)
-                  .map((v: any) => `${v.fecha}: ${v.obligacion}`)
-                  .join(", ")}`;
-              case "informefiscal":
-                return `**Riesgo Fiscal [Score]**: ${data.metadata.scoreRiesgoFiscal}/100\n- **ID**: ${data.metadata.idReporte}\n- **Estado General**: ${data.resumenCumplimiento.map((r: any) => `${r.area}: ${r.estado}`).join(", ")}`;
-              case "enviarmail":
-                return `**ID Transacción**: ${data.transaccion.idEnvio}\n- **Archivo**: ${data.archivoAdjunto.nombre}\n- **Peso**: ${data.archivoAdjunto.tamaño}`;
-              default:
-                return "Resumen no disponible.";
+            // Macro expansion for /todo
+            if (commandNames.includes("todo")) {
+              commandNames = [
+                "consultaarca",
+                "sistemaregistral",
+                "misfacilidades",
+                "deudavencimientos",
+                "rentascordoba",
+                "calendariovencimientosarca",
+                "informefiscal",
+                "enviarmail",
+              ];
             }
-          };
 
-          dataStream.write({
-            type: "text-delta",
-            id: textPartId,
-            delta: `## Reporte Fiscal — CUIT ${cuit}\n\n`,
-          });
+            // Every automation pipeline MUST end with the mail-sending step:
+            // regardless of the requested tools, the user needs the input field
+            // to send the consolidated report, and that input (via the
+            // [MAIL_INPUT_REPLACEMENT] marker) becomes part of the persisted
+            // report history restored when the report is reopened.
+            if (
+              commandNames.length > 0 &&
+              !commandNames.includes("enviarmail")
+            ) {
+              commandNames.push("enviarmail");
+            }
 
-          const allJsonReports: Array<{ tool: string; data: any }> = [];
+            const LABEL_MAP: Record<string, string> = {
+              consultaarca: "ConsultaArca",
+              sistemaregistral: "SistemaRegistral",
+              misfacilidades: "MisFacilidades",
+              deudavencimientos: "DeudaVencimientos",
+              rentascordoba: "RentasCordoba",
+              calendariovencimientosarca: "CalendarioVencimientosArca",
+              informefiscal: "📖 InformeFiscal",
+              enviarmail: "EnviarMail",
+            };
 
-          // ── Sequential (concatenated) tool execution ──────────────────────
-          for (const cmd of commandNames) {
-            const executor = FISCAL_COMMAND_MAP[cmd];
-            if (!executor) continue;
+            const formatSummary = (cmd: string, data: any) => {
+              switch (cmd) {
+                case "consultaarca":
+                  return `**Denominación**: ${data.denominacion}\n- **Condición**: ${data.condicionFiscal}\n- **Impuestos**: ${data.obligaciones.map((o: any) => `${o.impuesto} (${o.estado})`).join(", ")}`;
+                case "sistemaregistral":
+                  return `**Razón Social**: ${data.razonSocial}\n- **Actividad**: ${data.actividadPrincipal.descripcion}\n- **Domicilio**: ${data.domicilioFiscal.calle} ${data.domicilioFiscal.numero}, ${data.domicilioFiscal.localidad}`;
+                case "misfacilidades":
+                  return data.planesActivos.length > 0
+                    ? `**Planes Activos**: ${data.planesActivos.map((p: any) => `${p.regimen} (${p.estadoPlan})`).join(", ")}`
+                    : "No hay planes de pago activos.";
+                case "deudavencimientos":
+                  return `**Saldo Total**: $${data.saldoTotal}\n- **Deudas Vencidas**: ${data.deudasVencidas.length}\n- **Próximo Vencimiento**: ${data.proximoVencimiento}`;
+                case "rentascordoba":
+                  return `**Inscripción**: ${data.inscripcionIIBB.tipo}\n- **Estado**: ${data.inscripcionIIBB.estado}\n- **Saldo a Favor**: $${data.declaracionesJuradas.saldoAFavor}`;
+                case "calendariovencimientosarca":
+                  return `**Periodo**: ${data.periodo}\n- **Vencimientos Próximos**: ${data.vencimientos
+                    .slice(0, 3)
+                    .map((v: any) => `${v.fecha}: ${v.obligacion}`)
+                    .join(", ")}`;
+                case "informefiscal":
+                  return `**Riesgo Fiscal [Score]**: ${data.metadata.scoreRiesgoFiscal}/100\n- **ID**: ${data.metadata.idReporte}\n- **Estado General**: ${data.resumenCumplimiento.map((r: any) => `${r.area}: ${r.estado}`).join(", ")}`;
+                case "enviarmail":
+                  return `**ID Transacción**: ${data.transaccion.idEnvio}\n- **Archivo**: ${data.archivoAdjunto.nombre}\n- **Peso**: ${data.archivoAdjunto.tamaño}`;
+                default:
+                  return "Resumen no disponible.";
+              }
+            };
 
-            const label = LABEL_MAP[cmd] ?? cmd;
-            const agentId = generateAgentId();
-            const tasks = buildSubtasksForTool(cmd);
-            const taskCount = tasks.length;
-
-            // Notify client: session started
-            dataStream.write({
-              type: "data-agent-session-start",
-              data: {
-                agentId,
-                toolName: label,
-                toolKey: cmd,
-                profileId: profileId ?? null,
-                tasks: tasks.map((t) => ({ id: t.id, label: t.label })),
-              },
-            } as any);
-
-            // Write the "agent working" marker text so the button appears
-            dataStream.write({
-              type: "text-delta",
-              id: textPartId,
-              delta: `_Agente trabajando en ${label}..._\n\n`,
-            });
-
-            const sessionStartMs = Date.now();
-
-            if (cmd === "enviarmail") {
-              // EnviarMail: single task, no real execution — emit completed immediately
-              dataStream.write({
-                type: "data-agent-task-update",
-                data: {
-                  agentId,
-                  taskId: "task-0",
-                  status: "running",
-                  durationMs: undefined,
-                  costCents: 0,
-                },
-              } as any);
-
-              await new Promise((r) => setTimeout(r, 1000));
-
-              dataStream.write({
-                type: "data-agent-task-update",
-                data: {
-                  agentId,
-                  taskId: "task-0",
-                  status: "completed",
-                  durationMs: 1000,
-                  costCents: 0,
-                },
-              } as any);
-
-              dataStream.write({
-                type: "data-agent-session-complete",
-                data: { agentId, durationMs: Date.now() - sessionStartMs },
-              } as any);
-
+            // Accumulate the assistant's visible text so the completed report can
+            // be persisted to history and restored coherently on reopen.
+            const assistantDeltas: string[] = [];
+            const emitAssistantText = (delta: string) => {
+              assistantDeltas.push(delta);
               dataStream.write({
                 type: "text-delta",
                 id: textPartId,
-                delta: `### 📧 ${label} · ⏱️ 0.5s · 👣 1 · 💰 $0\n> **Acción requerida**: Por favor, ingrese el mail de destino para enviar el reporte consolidado.\n\n[MAIL_INPUT_REPLACEMENT]\n\n`,
+                delta,
               });
-              continue;
-            }
+            };
 
-            // ── Generic tool: distribute 5s across all tasks sequentially ──
-            const delayPerTask = Math.floor(TOOL_MOCK_DELAY_MS / taskCount);
+            emitAssistantText(`## Reporte Fiscal — CUIT ${cuit}\n\n`);
 
-            for (let i = 0; i < tasks.length; i++) {
-              const task = tasks[i];
-              const taskStart = Date.now();
+            const allJsonReports: Array<{ tool: string; data: any }> = [];
+            const activity: AgentSessionSnapshot[] = [];
 
-              // Task → running
-              dataStream.write({
-                type: "data-agent-task-update",
-                data: { agentId, taskId: task.id, status: "running" },
-              } as any);
+            // ── Sequential (concatenated) tool execution ──────────────────────
+            for (const cmd of commandNames) {
+              const executor = FISCAL_COMMAND_MAP[cmd];
+              if (!executor) {
+                continue;
+              }
 
-              await new Promise((r) => setTimeout(r, delayPerTask));
+              const label = LABEL_MAP[cmd] ?? cmd;
+              const isMonitorSession =
+                cmd !== "informefiscal" && cmd !== "enviarmail";
+              const agentId = generateAgentId();
+              const tasks = buildSubtasksForTool(cmd);
+              const taskCount = tasks.length;
 
-              const taskDuration = Date.now() - taskStart;
-              // Mock cost: 0.4 cents ($0.004) per subtask
-              const costCents = cmd === "enviarmail" ? 0 : 0.4;
+              // InformeFiscal & EnviarMail are NOT monitor sessions: they render
+              // only as inline chat output, so no data-agent-* events are emitted
+              // for them (and no "agent working" marker is written server-side).
 
-              // Task → completed
-              dataStream.write({
-                type: "data-agent-task-update",
-                data: {
+              if (isMonitorSession) {
+                // Notify client: session started
+                dataStream.write({
+                  type: "data-agent-session-start",
+                  data: {
+                    agentId,
+                    toolName: label,
+                    toolKey: cmd,
+                    profileId: profileId ?? null,
+                    tasks: tasks.map((t) => ({ id: t.id, label: t.label })),
+                  },
+                } as any);
+
+                // Write the "agent working" marker text so the button appears
+                emitAssistantText(`_Agente trabajando en ${label}..._\n\n`);
+              }
+
+              const sessionStartMs = Date.now();
+
+              if (cmd === "enviarmail") {
+                // EnviarMail: not a monitor session — emit mail input inline only.
+                await new Promise((r) => setTimeout(r, 1000));
+
+                emitAssistantText(
+                  `### 📧 ${label} · ⏱️ 0.5s · 👣 1 · 💰 $0\n> **Acción requerida**: Por favor, ingrese el mail de destino para enviar el reporte consolidado.\n\n[MAIL_INPUT_REPLACEMENT]\n\n`
+                );
+                continue;
+              }
+
+              // ── Generic tool: distribute 5s across all tasks sequentially ──
+              const delayPerTask = Math.floor(TOOL_MOCK_DELAY_MS / taskCount);
+              const taskDurations: number[] = [];
+
+              for (const task of tasks) {
+                const taskStart = Date.now();
+
+                // Task → running
+                if (isMonitorSession) {
+                  dataStream.write({
+                    type: "data-agent-task-update",
+                    data: { agentId, taskId: task.id, status: "running" },
+                  } as any);
+                }
+
+                await new Promise((r) => setTimeout(r, delayPerTask));
+
+                const taskDuration = Date.now() - taskStart;
+                taskDurations.push(taskDuration);
+                // Mock cost: 0.4 cents ($0.004) per subtask
+                const costCents = 0.4;
+
+                if (isMonitorSession) {
+                  // Task → completed
+                  dataStream.write({
+                    type: "data-agent-task-update",
+                    data: {
+                      agentId,
+                      taskId: task.id,
+                      status: "completed",
+                      durationMs: taskDuration,
+                      costCents,
+                    },
+                  } as any);
+                }
+              }
+
+              // Execute the actual (mocked) function after the visual delay
+              const data = await executor(cuit);
+              const totalDurationMs = Date.now() - sessionStartMs;
+              const duration = (totalDurationMs / 1000).toFixed(1);
+
+              if (cmd !== "informefiscal") {
+                allJsonReports.push({ tool: label, data });
+              }
+
+              if (isMonitorSession) {
+                // Notify client: session completed
+                dataStream.write({
+                  type: "data-agent-session-complete",
+                  data: { agentId, durationMs: totalDurationMs },
+                } as any);
+              }
+
+              const totalCostCents = tasks.length * 0.4;
+              const formattedCost = (totalCostCents / 100).toFixed(3);
+
+              if (isMonitorSession) {
+                // Snapshot the session so it can be restored from history.
+                activity.push({
                   agentId,
-                  taskId: task.id,
-                  status: "completed",
-                  durationMs: taskDuration,
-                  costCents,
-                },
-              } as any);
+                  toolKey: cmd,
+                  toolName: label,
+                  tasks: tasks.map((t, i) => ({
+                    id: t.id,
+                    label: t.label,
+                    status: "completed",
+                    durationMs: taskDurations[i],
+                    costCents: 0.4,
+                  })),
+                  startedAt: sessionStartMs,
+                  completedAt: Date.now(),
+                  totalCostCents,
+                });
+              }
+
+              if (cmd === "informefiscal") {
+                const enc = Buffer.from(
+                  JSON.stringify(allJsonReports)
+                ).toString("base64");
+                const delta = `### 🔍 ${label} · ⏱️ ${duration}s · 👣 5 · 💰 $${formattedCost}\n\n<details><summary>📦 Ver JSON</summary>\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n\n</details>\n\n[INFORME_FISCAL_BUTTON:${enc}]\n\n---\n\n`;
+                emitAssistantText(delta);
+              } else {
+                const delta = `### 🔍 ${label} · ⏱️ ${duration}s · 👣 5 · 💰 $${formattedCost}\n\n<details><summary>📦 Ver JSON</summary>\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n\n</details>\n\n<details><summary>📋 Ver Reporte Formateado</summary>\n\n${formatSummary(cmd, data)}\n\n</details>\n\n---\n\n`;
+                emitAssistantText(delta);
+              }
+            }
+            // ── End of sequential execution ───────────────────────────────────
+
+            dataStream.write({ type: "text-end", id: textPartId });
+
+            if (uiMessages.length === 1) {
+              const now = new Date();
+              const day = now.getDate().toString().padStart(2, "0");
+              const month = (now.getMonth() + 1).toString().padStart(2, "0");
+              const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+              const timestamp = `${day}/${month} ${time}`;
+              const title = `Informe ${cuit} — ${timestamp}`;
+              dataStream.write({ type: "data-chat-title", data: title });
+              try {
+                await updateChatTitleById({ chatId: id, title });
+              } catch (err) {
+                console.error("Failed to save chat title:", err);
+              }
             }
 
-            // Execute the actual (mocked) function after the visual delay
-            const data = await executor(cuit);
-            const totalDurationMs = Date.now() - sessionStartMs;
-            const duration = (totalDurationMs / 1000).toFixed(1);
-
-            if (cmd !== "informefiscal") {
-              allJsonReports.push({ tool: label, data });
+            // Persist the executed agent sessions so the monitor can be restored
+            // from history on reload (informefiscal/enviarmail are excluded).
+            if (activity.length > 0) {
+              try {
+                await saveChatActivity({ chatId: id, activity });
+              } catch (err) {
+                console.error("Failed to save agent activity:", err);
+              }
             }
 
-            // Notify client: session completed
-            dataStream.write({
-              type: "data-agent-session-complete",
-              data: { agentId, durationMs: totalDurationMs },
-            } as any);
-
-            const totalCostCents =
-              tasks.length * (cmd === "enviarmail" ? 0 : 0.4);
-            const formattedCost = (totalCostCents / 100).toFixed(3);
-
-            if (cmd === "informefiscal") {
-              const enc = Buffer.from(JSON.stringify(allJsonReports)).toString(
-                "base64"
-              );
-              const delta = `### 🔍 ${label} · ⏱️ ${duration}s · 👣 5 · 💰 $${formattedCost}\n\n<details><summary>📦 Ver JSON</summary>\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n\n</details>\n\n[INFORME_FISCAL_BUTTON:${enc}]\n\n---\n\n`;
-              dataStream.write({ type: "text-delta", id: textPartId, delta });
-            } else {
-              const delta = `### 🔍 ${label} · ⏱️ ${duration}s · 👣 5 · 💰 $${formattedCost}\n\n<details><summary>📦 Ver JSON</summary>\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n\n</details>\n\n<details><summary>📋 Ver Reporte Formateado</summary>\n\n${formatSummary(cmd, data)}\n\n</details>\n\n---\n\n`;
-              dataStream.write({ type: "text-delta", id: textPartId, delta });
-            }
-          }
-          // ── End of sequential execution ───────────────────────────────────
-
-          dataStream.write({ type: "text-end", id: textPartId });
-
-          if (uiMessages.length === 1) {
-            const now = new Date();
-            const day = now.getDate().toString().padStart(2, "0");
-            const month = (now.getMonth() + 1).toString().padStart(2, "0");
-            const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
-            const timestamp = `${day}/${month} ${time}`;
-            const title = `Informe ${cuit} — ${timestamp}`;
-            dataStream.write({ type: "data-chat-title", data: title });
+            // Flip the chat to "done" now that the fiscal tool sequence finished,
+            // so the sidebar history list can drop its "running" indicator.
             try {
-              await updateChatTitleById({ chatId: id, title });
+              await updateChatStatusById({ chatId: id, status: "done" });
             } catch (err) {
-              console.error("Failed to save chat title:", err);
+              console.error("Failed to update chat status:", err);
             }
+
+            // Persist the assistant's full visible response so a report opened
+            // from history shows all the steps it performed (not an empty Greeting).
+            if (assistantDeltas.length > 0) {
+              try {
+                await saveMessages({
+                  messages: [
+                    {
+                      id: generateUUID(),
+                      chatId: id,
+                      role: "assistant",
+                      parts: [
+                        {
+                          type: "text",
+                          text: assistantDeltas.join(""),
+                        },
+                      ],
+                      attachments: [],
+                      createdAt: new Date(),
+                    },
+                  ],
+                });
+              } catch (err) {
+                console.error("Failed to save assistant report:", err);
+              }
+            }
+          } finally {
+            inFlightExecutions.delete(executionKey);
           }
         },
         generateId: generateUUID,
@@ -366,6 +471,14 @@ export async function POST(request: Request) {
             "⚠️ **El sistema de Chat General está desactivado.**\n\nEste entorno está configurado exclusivamente como **Consola Fiscal**. Para generar un reporte, ingrese un CUIT seguido de los comandos deseados (ej: `20389727785 /ConsultaArca /RentasCordoba`).",
         });
         dataStream.write({ type: "text-end", id: textPartId });
+
+        // No tools ran, but the chat row (created above for the first
+        // message) must not stay stuck on "running" in the sidebar.
+        try {
+          await updateChatStatusById({ chatId: id, status: "done" });
+        } catch (err) {
+          console.error("Failed to update chat status:", err);
+        }
       },
       generateId: generateUUID,
     });
@@ -377,6 +490,6 @@ export async function POST(request: Request) {
   }
 }
 
-export async function DELETE(request: Request) {
+export function DELETE(_request: Request) {
   return Response.json({ success: true }, { status: 200 });
 }

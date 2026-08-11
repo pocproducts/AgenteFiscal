@@ -1,11 +1,11 @@
 import { BarChart } from "lucide-react";
 import { cookies } from "next/headers";
+import { AnalyticsOverview } from "@/components/analytics/analytics-overview";
 import { getDictionary } from "@/lib/i18n/server";
 
 export default async function AnalyticsOverviewPage() {
   const cookieStore = await cookies();
-  const locale =
-    cookieStore.get("optimus-lang")?.value === "en" ? "en" : "es";
+  const locale = cookieStore.get("optimus-lang")?.value === "en" ? "en" : "es";
   const t = getDictionary(locale);
   const dash = t.panel.pages.analytics.dashboard;
 
@@ -22,8 +22,8 @@ export default async function AnalyticsOverviewPage() {
           <p className="text-sm text-muted-foreground">{dash.description}</p>
         </div>
       </div>
-      <div className="flex-1 p-6">
-        <div className="text-muted-foreground text-sm">{dash.empty}</div>
+      <div className="flex-1 overflow-y-auto p-6">
+        <AnalyticsOverview />
       </div>
     </div>
   );

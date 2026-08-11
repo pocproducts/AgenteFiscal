@@ -21,7 +21,14 @@ import { BarColumnsChart } from "@/components/analytics/charts/bar-columns";
 import { KpiCard } from "@/components/analytics/kpi-card";
 import { RangeSwitcher } from "@/components/analytics/range-switcher";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -259,11 +266,9 @@ export function LlmGatewayPanel({
       {/* Row 1 — KPIs */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {loading || !kpis ? (
-          <>
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton className="h-24 w-full rounded-2xl" key={i} />
-            ))}
-          </>
+          [0, 1, 2, 3].map((n) => (
+            <Skeleton className="h-24 w-full rounded-2xl" key={n} />
+          ))
         ) : (
           <>
             <KpiCard
@@ -298,8 +303,8 @@ export function LlmGatewayPanel({
       {/* Row 2 — 2x2 charts */}
       {loading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton className="h-56 w-full rounded-2xl" key={i} />
+          {[0, 1, 2, 3].map((n) => (
+            <Skeleton className="h-56 w-full rounded-2xl" key={n} />
           ))}
         </div>
       ) : isEmpty ? (
@@ -369,66 +374,66 @@ export function LlmGatewayPanel({
       {/* BYOK */}
       {snapshot ? (
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900/50 dark:bg-zinc-950/40 p-5 shadow-sm">
-        <div className="mb-1 flex items-center gap-2">
-          <KeyRound className="h-4 w-4 text-[#10b981]" />
-          <h3 className="text-sm font-semibold tracking-tight text-foreground">
-            {dict.byok.title}
-          </h3>
-        </div>
-        <p className="mb-4 text-xs text-muted-foreground">
-          {dict.byok.subtitle}
-        </p>
-        <div className="flex flex-col divide-y divide-zinc-800 border-y border-zinc-800">
-          {snapshot.byok.map((provider) => {
-            const ProviderIcon = PROVIDER_ICONS[provider.id] ?? Bot;
-            return (
-              <div
-                className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between"
-                key={provider.id}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-900 border border-zinc-800/80">
-                    <ProviderIcon className="h-4 w-4 text-muted-foreground" />
+          <div className="mb-1 flex items-center gap-2">
+            <KeyRound className="h-4 w-4 text-[#10b981]" />
+            <h3 className="text-sm font-semibold tracking-tight text-foreground">
+              {dict.byok.title}
+            </h3>
+          </div>
+          <p className="mb-4 text-xs text-muted-foreground">
+            {dict.byok.subtitle}
+          </p>
+          <div className="flex flex-col divide-y divide-zinc-800 border-y border-zinc-800">
+            {snapshot.byok.map((provider) => {
+              const ProviderIcon = PROVIDER_ICONS[provider.id] ?? Bot;
+              return (
+                <div
+                  className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between"
+                  key={provider.id}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-900 border border-zinc-800/80">
+                      <ProviderIcon className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        {provider.label}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {provider.description}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-foreground">
-                      {provider.label}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {provider.description}
-                    </p>
+                  <div className="flex items-center gap-3 pl-12 sm:pl-0">
+                    {provider.encrypted ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.08)]">
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        {dict.byok.encryptedVault}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full border border-zinc-850 bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
+                        {dict.byok.notConfigured}
+                      </span>
+                    )}
+                    <Button
+                      className="rounded-lg border-zinc-700 hover:bg-zinc-800 hover:text-foreground"
+                      onClick={() => {
+                        setActiveProvider(provider);
+                        setApiKey("");
+                      }}
+                      size="sm"
+                      variant="outline"
+                    >
+                      {provider.encrypted
+                        ? dict.byok.manage
+                        : dict.byok.configure}
+                    </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 pl-12 sm:pl-0">
-                  {provider.encrypted ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.08)]">
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                      {dict.byok.encryptedVault}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center rounded-full border border-zinc-850 bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
-                      {dict.byok.notConfigured}
-                    </span>
-                  )}
-                  <Button
-                    className="rounded-lg border-zinc-700 hover:bg-zinc-800 hover:text-foreground"
-                    onClick={() => {
-                      setActiveProvider(provider);
-                      setApiKey("");
-                    }}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {provider.encrypted
-                      ? dict.byok.manage
-                      : dict.byok.configure}
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+              );
+            })}
+          </div>
+        </section>
       ) : null}
 
       {/* Routing / failover */}

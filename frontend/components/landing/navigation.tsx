@@ -14,10 +14,9 @@ function LanguageSwitcher({ className = "" }: { className?: string }) {
   ];
 
   return (
-    <div
+    <fieldset
       aria-label="Language selector"
       className={`inline-flex items-center gap-0.5 rounded-full border border-foreground/15 p-0.5 ${className}`}
-      role="group"
     >
       {options.map((option) => (
         <button
@@ -34,7 +33,7 @@ function LanguageSwitcher({ className = "" }: { className?: string }) {
           {option.label}
         </button>
       ))}
-    </div>
+    </fieldset>
   );
 }
 
@@ -78,7 +77,7 @@ export function Navigation() {
         >
           {/* Logo + Language */}
           <div className="flex items-center gap-3">
-            <a className="flex items-center gap-2 group" href="#">
+            <a className="flex items-center gap-2 group" href="/">
               <span
                 className={`font-display tracking-tight transition-all duration-500 ${isScrolled ? "text-xl" : "text-2xl"}`}
               >
@@ -132,6 +131,7 @@ export function Navigation() {
             aria-label={t.nav.toggleMenu}
             className="md:hidden p-2"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            type="button"
           >
             {isMobileMenuOpen ? (
               <X className="w-6 h-6" />

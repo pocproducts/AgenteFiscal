@@ -1,7 +1,7 @@
 "use server";
 
-import { generateText, type UIMessage } from "ai";
 import { auth } from "@clerk/nextjs/server";
+import { generateText, type UIMessage } from "ai";
 import { cookies } from "next/headers";
 import type { VisibilityType } from "@/components/chat/visibility-selector";
 import { titleModel } from "@/lib/ai/models";
@@ -40,7 +40,7 @@ export async function generateTitleFromUserMessage({
 }
 
 export async function deleteTrailingMessages({ id }: { id: string }) {
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
   if (!userId) {
     throw new Error("Unauthorized");
   }
@@ -51,7 +51,7 @@ export async function deleteTrailingMessages({ id }: { id: string }) {
   }
 
   const chat = await getChatById({ id: message.chatId });
-  if (!chat || chat.userId !== userId) {
+  if (!chat || chat.userId !== userId || chat.tenantId !== orgId) {
     throw new Error("Unauthorized");
   }
 
@@ -68,7 +68,7 @@ export async function updateChatVisibility({
   chatId: string;
   visibility: VisibilityType;
 }) {
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
   if (!userId) {
     throw new Error("Unauthorized");
   }
@@ -79,7 +79,7 @@ export async function updateChatVisibility({
     return;
   }
 
-  if (chat.userId !== userId) {
+  if (chat.userId !== userId || chat.tenantId !== orgId) {
     throw new Error("Unauthorized");
   }
 

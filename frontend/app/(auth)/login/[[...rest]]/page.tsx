@@ -1,13 +1,13 @@
-import { SignIn } from "@clerk/nextjs";
+import { SignInWidget } from "@/components/auth/clerk-widgets";
 
 export default function LoginPage() {
   return (
     <div className="flex w-full items-center justify-center">
-      <SignIn
+      <SignInWidget
+        forceRedirectUrl="/chat"
         path="/login"
         routing="path"
         signUpUrl="/register"
-        afterSignInUrl="/chat"
       />
     </div>
   );

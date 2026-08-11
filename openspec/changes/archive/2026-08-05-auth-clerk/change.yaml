@@ -3,9 +3,11 @@
 schema: spec-driven
 change: auth-clerk
 summary: Replace NextAuth v5 with Clerk behind the hexagonal AuthPort (register, login, tenant via Clerk Organizations). Absorbs/supersedes auth-tenant port/adapters/UI work; adds real clerk adapter + session seam + ClerkProvider + prebuilt SignIn/SignUp; drops guest flow; bumps react~19.1.x and next>=16.2.6.
-status: active
+status: cancelled-archived
 created: 2026-08-04
-updated: 2026-08-04
+updated: 2026-08-05
+archived: 2026-08-05
+archive_reason: Leftover planning artifact superseded by the monorepo restructure; NextAuth removed outright, auth migration not implemented.
 author: gentle-orchestrator
 session_preflight:
   mode: auto

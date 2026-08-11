@@ -1,5 +1,5 @@
-import type { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import type { NextRequest } from "next/server";
 import { deleteAllChatsByUserId, getChatsByUserId } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
 
@@ -20,14 +20,19 @@ export async function GET(request: NextRequest) {
     ).toResponse();
   }
 
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
   if (!userId) {
     return new ChatbotError("unauthorized:chat").toResponse();
   }
 
+  if (!orgId) {
+    return new ChatbotError("forbidden:auth").toResponse();
+  }
+
   const chats = await getChatsByUserId({
     id: userId,
+    tenantId: orgId,
     limit,
     startingAfter,
     endingBefore,
@@ -37,13 +42,17 @@ export async function GET(request: NextRequest) {
 }
 
 export async function DELETE() {
-  const { userId } = await auth();
+  const { userId, orgId } = await auth();
 
   if (!userId) {
     return new ChatbotError("unauthorized:chat").toResponse();
   }
 
-  const result = await deleteAllChatsByUserId({ userId });
+  if (!orgId) {
+    return new ChatbotError("forbidden:auth").toResponse();
+  }
+
+  const result = await deleteAllChatsByUserId({ userId, tenantId: orgId });
 
   return Response.json(result, { status: 200 });
 }

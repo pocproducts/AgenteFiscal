@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import useSWR from "swr";
+import { useTenantKey } from "@/hooks/use-tenant-key";
 
 export interface Profile {
   id: string;
@@ -12,16 +13,15 @@ export interface Profile {
 }
 
 export function useProfiles() {
-  const { data: profiles, mutate: setProfiles } = useSWR<Profile[]>(
-    "execution-profiles",
-    null,
-    { fallbackData: [] }
-  );
+  const key = useTenantKey("execution-profiles");
+  const { data: profiles, mutate: setProfiles } = useSWR<Profile[]>(key, null, {
+    fallbackData: [],
+  });
 
   const addProfile = useCallback(
     (name: string, domains: string[] = []) => {
       const newProfile: Profile = {
-        id: `prof_${Math.random().toString(36).substring(2, 7)}`,
+        id: `prof_${Math.random().toString(36).slice(2, 7)}`,
         name,
         createdAt: new Date().toISOString().split("T")[0],
         cookiesDomains: domains,

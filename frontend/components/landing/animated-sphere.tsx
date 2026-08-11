@@ -79,11 +79,11 @@ export function AnimatedSphere() {
       points.sort((a, b) => a.z - b.z);
 
       // Draw points
-      points.forEach((point) => {
+      for (const point of points) {
         const alpha = 0.2 + (point.z + 1) * 0.4;
         ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
         ctx.fillText(point.char, point.x, point.y);
-      });
+      }
 
       time += 0.02;
       frameRef.current = requestAnimationFrame(render);

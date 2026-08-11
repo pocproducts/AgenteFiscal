@@ -94,14 +94,14 @@ function OverviewLoading() {
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton className="h-20 w-full" key={i} />
+        {[0, 1, 2, 3].map((n) => (
+          <Skeleton className="h-20 w-full" key={n} />
         ))}
       </div>
       <Skeleton className="h-64 w-full rounded-2xl" />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton className="h-20 w-full" key={i} />
+        {[0, 1, 2, 3, 4].map((n) => (
+          <Skeleton className="h-20 w-full" key={n} />
         ))}
       </div>
       <Skeleton className="h-64 w-full rounded-2xl" />

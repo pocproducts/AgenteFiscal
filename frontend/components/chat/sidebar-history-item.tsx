@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import Link from "next/link";
 import { memo } from "react";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
@@ -54,6 +55,12 @@ const PureChatItem = ({
         isActive={isActive}
       >
         <Link href={`/chat/${chat.id}`} onClick={() => setOpenMobile(false)}>
+          {chat.status === "running" && (
+            <Loader2
+              aria-label={nav.chatRunning}
+              className="size-3 shrink-0 animate-spin text-muted-foreground"
+            />
+          )}
           <span className="truncate">{chat.title}</span>
         </Link>
       </SidebarMenuButton>

@@ -12,6 +12,7 @@ import {
   Zap,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
+import { useLanguage } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export type SlashCommand = {
@@ -21,6 +22,31 @@ export type SlashCommand = {
   action: string;
   shortcut?: string;
 };
+
+/** Tool keys expanded by /todo, in the same order the server macro runs them. */
+export const TODO_TOOL_KEYS: string[] = [
+  "consultaarca",
+  "sistemaregistral",
+  "misfacilidades",
+  "deudavencimientos",
+  "rentascordoba",
+  "calendariovencimientosarca",
+  "informefiscal",
+  "enviarmail",
+];
+
+/** Expands a command into the ordered list of tools that will actually run. */
+export function expandCommandPlan(command: SlashCommand): SlashCommand[] {
+  if (command.action === "todo") {
+    const byAction = new Map(
+      slashCommands.map((cmd) => [cmd.action, cmd] as const)
+    );
+    return TODO_TOOL_KEYS.map((key) => byAction.get(key)).filter(
+      (cmd): cmd is SlashCommand => cmd !== undefined
+    );
+  }
+  return [command];
+}
 
 export const slashCommands: SlashCommand[] = [
   {
@@ -95,6 +121,8 @@ export function SlashCommandMenu({
   selectedIndex,
 }: SlashCommandMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const { t } = useLanguage();
+  const dict = t.panel.chat.slashCommands;
   const filtered = slashCommands.filter((cmd) => {
     const alreadySelected = context
       .toLowerCase()
@@ -120,7 +148,7 @@ export function SlashCommandMenu({
       ref={menuRef}
     >
       <div className="px-4 py-2.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/40">
-        Commands
+        {dict.label}
       </div>
       <div className="max-h-64 overflow-y-auto pb-1 no-scrollbar">
         {filtered.map((cmd, index) => (
@@ -142,7 +170,7 @@ export function SlashCommandMenu({
               /{cmd.name}
             </span>
             <span className="text-[12px] text-muted-foreground/50">
-              {cmd.description}
+              {dict[cmd.action as keyof typeof dict] ?? cmd.description}
             </span>
             {cmd.shortcut && (
               <span className="ml-auto text-[11px] text-muted-foreground/30">

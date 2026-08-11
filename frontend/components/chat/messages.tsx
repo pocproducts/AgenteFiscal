@@ -1,14 +1,31 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { ArrowDownIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
 import type { Vote } from "@/lib/db/schema";
-import type { ChatMessage } from "@/lib/types";
 import { useLanguage } from "@/lib/i18n";
+import type { ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
-import { Greeting } from "./greeting";
-import { PreviewMessage, ThinkingMessage } from "./message";
+import { PreviewMessage } from "./message";
+import { ThinkingMessage } from "./thinking-message";
+
+/**
+ * A chat with no messages and no auto-sent query only happens off the normal
+ * launch path (e.g. a stale/bookmarked /chat/[id] URL) — "Nuevo Agente" is
+ * the one place that starts a report, so send it there instead of showing a
+ * second, duplicate "start a report" screen.
+ */
+function EmptyChatRedirect() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/agent-sessions/new");
+  }, [router]);
+
+  return null;
+}
 
 type MessagesProps = {
   addToolApprovalResponse: UseChatHelpers<ChatMessage>["addToolApprovalResponse"];
@@ -21,8 +38,7 @@ type MessagesProps = {
   isReadonly: boolean;
   isArtifactVisible: boolean;
   isLoading?: boolean;
-  sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
-  selectedModelId: string;
+  hasPendingLaunch?: boolean;
   onEditMessage?: (message: ChatMessage) => void;
 };
 
@@ -37,8 +53,7 @@ function PureMessages({
   isReadonly,
   isArtifactVisible,
   isLoading,
-  sendMessage,
-  selectedModelId: _selectedModelId,
+  hasPendingLaunch,
   onEditMessage,
 }: MessagesProps) {
   const { t } = useLanguage();
@@ -65,10 +80,8 @@ function PureMessages({
 
   return (
     <div className="relative flex-1 bg-background">
-      {messages.length === 0 && !isLoading && (
-        <div className="absolute inset-0 z-10 flex w-full items-center justify-center">
-          <Greeting />
-        </div>
+      {messages.length === 0 && !isLoading && !hasPendingLaunch && (
+        <EmptyChatRedirect />
       )}
       <div
         className={cn(

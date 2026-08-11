@@ -3,10 +3,9 @@
 import { isToday, isYesterday, subMonths, subWeeks } from "date-fns";
 import { motion } from "framer-motion";
 import { usePathname, useRouter } from "next/navigation";
-import type { PanelUser } from "@/lib/shared/db-types";
 import { useState } from "react";
-import { toast } from "sonner";
 import useSWRInfinite from "swr/infinite";
+import { toast } from "@/components/chat/toast";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +25,7 @@ import {
 } from "@/components/ui/sidebar";
 import type { Chat } from "@/lib/db/schema";
 import { useLanguage } from "@/lib/i18n";
+import type { PanelUser } from "@/lib/shared/db-types";
 import { fetcher } from "@/lib/utils";
 import { LoaderIcon } from "./icons";
 import { ChatItem } from "./sidebar-history-item";
@@ -154,7 +154,7 @@ export function SidebarHistory({ user }: { user: PanelUser | undefined }) {
       { method: "DELETE" }
     );
 
-    toast.success(nav.chatDeleted);
+    toast({ description: nav.chatDeleted, type: "success" });
   };
 
   if (!user) {

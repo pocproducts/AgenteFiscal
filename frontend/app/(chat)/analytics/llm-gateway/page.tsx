@@ -1,11 +1,11 @@
 import { Server } from "lucide-react";
 import { cookies } from "next/headers";
+import { LlmGatewayPanel } from "@/components/analytics/llm-gateway-panel";
 import { getDictionary } from "@/lib/i18n/server";
 
 export default async function LLMGatewayPage() {
   const cookieStore = await cookies();
-  const locale =
-    cookieStore.get("optimus-lang")?.value === "en" ? "en" : "es";
+  const locale = cookieStore.get("optimus-lang")?.value === "en" ? "en" : "es";
   const t = getDictionary(locale);
   const gw = t.panel.pages.analytics.llmGateway;
 
@@ -22,8 +22,8 @@ export default async function LLMGatewayPage() {
           <p className="text-sm text-muted-foreground">{gw.description}</p>
         </div>
       </div>
-      <div className="flex-1 p-6">
-        <div className="text-muted-foreground text-sm">{gw.empty}</div>
+      <div className="flex-1 overflow-y-auto p-6">
+        <LlmGatewayPanel />
       </div>
     </div>
   );

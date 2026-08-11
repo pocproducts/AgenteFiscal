@@ -1,6 +1,7 @@
 "use client";
 
 import useSWR from "swr";
+import { useTenantKey } from "@/hooks/use-tenant-key";
 import type { GatewaySnapshot, RangeKey } from "@/lib/analytics/types";
 
 type GatewayFetcher = (
@@ -19,9 +20,8 @@ export function useGateway(
   isCustom = false,
   fetcher?: GatewayFetcher
 ) {
-  return useSWR<GatewaySnapshot | null>(
-    `analytics-gateway:${range}:${isCustom}`,
-    fetcher ?? null,
-    { fallbackData: null }
-  );
+  const key = useTenantKey(`analytics-gateway:${range}:${isCustom}`);
+  return useSWR<GatewaySnapshot | null>(key, fetcher ?? null, {
+    fallbackData: null,
+  });
 }

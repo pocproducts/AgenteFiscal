@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { getChatById, getMessagesByChatId } from "@/lib/db/queries";
+import { ChatbotError } from "@/lib/errors";
 import { convertToUIMessages } from "@/lib/utils";
 
 export async function GET(request: Request) {
@@ -7,37 +8,36 @@ export async function GET(request: Request) {
   const chatId = searchParams.get("chatId");
 
   if (!chatId) {
-    return Response.json({ error: "chatId required" }, { status: 400 });
+    return new ChatbotError(
+      "bad_request:api",
+      "Parameter chatId is required."
+    ).toResponse();
   }
 
-  const [{ userId }, chat, messages] = await Promise.all([
-    auth(),
+  const { userId, orgId } = await auth();
+
+  const [chat, messages] = await Promise.all([
     getChatById({ id: chatId }),
     getMessagesByChatId({ id: chatId }),
   ]);
 
   if (!chat) {
-    return Response.json({
-      messages: [],
-      visibility: "private",
-      userId: null,
-      isReadonly: false,
-    });
+    return new ChatbotError("not_found:chat").toResponse();
   }
 
-  if (
-    chat.visibility === "private" &&
-    (!userId || userId !== chat.userId)
-  ) {
-    return Response.json({ error: "forbidden" }, { status: 403 });
+  const isOwner = !!userId && userId === chat.userId && orgId === chat.tenantId;
+
+  if (chat.visibility === "private" && !isOwner) {
+    return new ChatbotError("forbidden:chat").toResponse();
   }
 
-  const isReadonly = !userId || userId !== chat.userId;
+  const isReadonly = !isOwner;
 
   return Response.json({
     messages: convertToUIMessages(messages),
     visibility: chat.visibility,
     userId: chat.userId,
     isReadonly,
+    activity: chat.agentActivity ?? [],
   });
 }

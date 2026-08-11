@@ -16,6 +16,17 @@ export interface AgentTask {
 
 export type AgentSessionStatus = "idle" | "running" | "completed" | "error";
 
+/** Immutable snapshot of a completed agent session for chat history hydration. */
+export interface AgentSessionSnapshot {
+  agentId: string;
+  toolKey: string;
+  toolName: string;
+  tasks: AgentTask[];
+  startedAt?: number;
+  completedAt?: number;
+  totalCostCents: number;
+}
+
 export interface AgentSession {
   /** Stable unique ID for this agent / embedded browser instance */
   agentId: string;

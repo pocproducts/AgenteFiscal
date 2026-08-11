@@ -2,13 +2,21 @@
 
 import type React from "react";
 import { createContext, useContext, useEffect, useState } from "react";
-import { translations, type Language, type Translations } from "./dictionary";
+import { type Language, type Translations, translations } from "./dictionary";
 
 export type { Language, Translations } from "./dictionary";
 export type LanguageContextValue = {
   language: Language;
   setLanguage: (lang: Language) => void;
   t: Translations["en"];
+};
+
+// Keeps <title> in sync with the locale. Static metadata is defined in
+// app/layout.tsx (es) because reading cookies() in generateMetadata breaks
+// prerenderable routes in Next 16; the toggle updates the title client-side.
+const DOCUMENT_TITLES: Record<Language, string> = {
+  en: "Fiscal Assistant",
+  es: "Asistente Fiscal",
 };
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);
@@ -39,14 +47,6 @@ export function LanguageProvider({
     return initialLocale;
   };
 
-  // Keeps <title> in sync with the locale. Static metadata is defined in
-  // app/layout.tsx (es) because reading cookies() in generateMetadata breaks
-  // prerenderable routes in Next 16; the toggle updates the title client-side.
-  const DOCUMENT_TITLES: Record<Language, string> = {
-    en: "Next.js Chatbot Template",
-    es: "Asistente Fiscal",
-  };
-
   const [language, setLanguageState] = useState<Language>(resolveInitial);
 
   // One-time hydration sync for legacy landing visitors who stored
@@ -58,10 +58,11 @@ export function LanguageProvider({
     ) as Language | null;
     if ((stored === "en" || stored === "es") && stored !== initialLocale) {
       setLanguageState(stored);
+      // biome-ignore lint/suspicious/noDocumentCookie: allowlist-enforced locale persistence; value is only "en"/"es", never attacker-controlled.
       document.cookie = `${encodeURIComponent("optimus-lang")}=${encodeURIComponent(stored)}; path=/; max-age=${60 * 60 * 24 * 365}`;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on hydration
-  }, []);
+  }, [initialLocale]);
 
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
@@ -75,13 +76,15 @@ export function LanguageProvider({
     // Fire-and-forget: never block the UI on the fetch. Respects the
     // NEXT_PUBLIC_BASE_PATH used by other API fetches (IS_DEMO=1 -> /demo).
     const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-    void fetch(`${basePath}/api/locale`, {
+    fetch(`${basePath}/api/locale`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lang }),
-    }).catch(() => {
-      // Ignore network failures — localStorage + documentElement already applied.
-    });
+    })
+      .then(() => undefined)
+      .catch(() => {
+        // Ignore network failures — localStorage + documentElement already applied.
+      });
   };
 
   useEffect(() => {

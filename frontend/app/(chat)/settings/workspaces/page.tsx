@@ -4,8 +4,7 @@ import { getDictionary } from "@/lib/i18n/server";
 
 export default async function WorkspacesSettingsPage() {
   const cookieStore = await cookies();
-  const locale =
-    cookieStore.get("optimus-lang")?.value === "en" ? "en" : "es";
+  const locale = cookieStore.get("optimus-lang")?.value === "en" ? "en" : "es";
   const t = getDictionary(locale);
   const ws = t.panel.pages.workspaces;
 

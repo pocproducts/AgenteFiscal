@@ -2,8 +2,10 @@
 # Auth + tenant clean architecture — port/adapter for mock-now / Clerk-later
 schema: spec-driven
 change: auth-tenant
-status: proposal
+status: cancelled-archived
 created: 2026-08-03
+archived: 2026-08-05
+cancellation_reason: auth + tenant port/adapter plan superseded; absorbed conceptually by auth-clerk but neither was implemented; NextAuth removed in restructure.
 author: gentle-orchestrator
 session_preflight:
   mode: auto

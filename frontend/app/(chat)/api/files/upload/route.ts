@@ -1,8 +1,7 @@
+import { auth } from "@clerk/nextjs/server";
 import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-
-import { auth } from "@clerk/nextjs/server";
 import { ChatbotError } from "@/lib/errors";
 
 const FileSchema = z.object({

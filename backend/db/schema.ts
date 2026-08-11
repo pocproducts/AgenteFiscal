@@ -23,7 +23,10 @@ export interface Chat {
   createdAt: Date;
   title: string;
   userId: string;
+  tenantId: string;
   visibility: "public" | "private";
+  status: "running" | "done";
+  agentActivity?: unknown;
 }
 
 export interface DBMessage {
@@ -48,6 +51,7 @@ export interface Document {
   content: string | null;
   kind: "text" | "code" | "image" | "sheet";
   userId: string;
+  tenantId: string;
 }
 
 export interface Suggestion {

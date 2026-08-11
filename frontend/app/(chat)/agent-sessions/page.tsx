@@ -18,7 +18,9 @@ export default function AgentSessionsPage() {
 
   // Helper to find profile name of a session
   const getProfileName = (profileId?: string) => {
-    if (!profileId) return "—";
+    if (!profileId) {
+      return "—";
+    }
     const found = profiles.find((p) => p.id === profileId);
     return found ? found.name : profileId;
   };
@@ -27,17 +29,23 @@ export default function AgentSessionsPage() {
   const getLastTaskLabel = (
     tasks: Array<{ label: string; status: string }>
   ) => {
-    if (!tasks || tasks.length === 0) return dict.initializing;
+    if (!tasks || tasks.length === 0) {
+      return dict.initializing;
+    }
 
     // Find first running task
     const running = tasks.find((t) => t.status === "running");
-    if (running) return running.label;
+    if (running) {
+      return running.label;
+    }
 
     // Else find the last completed task
     const completed = [...tasks]
       .reverse()
       .find((t) => t.status === "completed");
-    if (completed) return completed.label;
+    if (completed) {
+      return completed.label;
+    }
 
     return tasks[0].label;
   };
@@ -52,9 +60,7 @@ export default function AgentSessionsPage() {
           <h1 className="text-lg font-semibold tracking-tight text-foreground">
             {dict.title}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            {dict.description}
-          </p>
+          <p className="text-sm text-muted-foreground">{dict.description}</p>
         </div>
       </div>
 

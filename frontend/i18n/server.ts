@@ -1,4 +1,4 @@
-import { translations, type Language } from "./dictionary";
+import { type Language, translations } from "./dictionary";
 
 export type Dictionary = typeof translations.en;
 

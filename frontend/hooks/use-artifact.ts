@@ -3,6 +3,7 @@
 import { useCallback, useMemo } from "react";
 import useSWR from "swr";
 import type { UIArtifact } from "@/components/chat/artifact";
+import { useTenantKey } from "@/hooks/use-tenant-key";
 
 export const initialArtifactData: UIArtifact = {
   documentId: "init",
@@ -22,7 +23,8 @@ export const initialArtifactData: UIArtifact = {
 type Selector<T> = (state: UIArtifact) => T;
 
 export function useArtifactSelector<Selected>(selector: Selector<Selected>) {
-  const { data: localArtifact } = useSWR<UIArtifact>("artifact", null, {
+  const key = useTenantKey("artifact");
+  const { data: localArtifact } = useSWR<UIArtifact>(key, null, {
     fallbackData: initialArtifactData,
   });
 
@@ -37,8 +39,9 @@ export function useArtifactSelector<Selected>(selector: Selector<Selected>) {
 }
 
 export function useArtifact() {
+  const artifactKey = useTenantKey("artifact");
   const { data: localArtifact, mutate: setLocalArtifact } = useSWR<UIArtifact>(
-    "artifact",
+    artifactKey,
     null,
     {
       fallbackData: initialArtifactData,
@@ -67,15 +70,13 @@ export function useArtifact() {
     [setLocalArtifact]
   );
 
+  const metadataKey = useTenantKey(
+    artifact.documentId ? `artifact-metadata-${artifact.documentId}` : null
+  );
   const { data: localArtifactMetadata, mutate: setLocalArtifactMetadata } =
-    useSWR<any>(
-      () =>
-        artifact.documentId ? `artifact-metadata-${artifact.documentId}` : null,
-      null,
-      {
-        fallbackData: null,
-      }
-    );
+    useSWR<any>(metadataKey, null, {
+      fallbackData: null,
+    });
 
   return useMemo(
     () => ({

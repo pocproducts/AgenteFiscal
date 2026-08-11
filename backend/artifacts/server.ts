@@ -55,12 +55,17 @@ export function createDocumentHandler<T extends ArtifactKind>(config: {
       });
 
       if (args.session?.user?.id) {
+        // Unreachable from the live fiscal-console route (which never invokes
+        // this generic AI-SDK tool-calling path), and PanelSession carries no
+        // tenant — flagged for an A2-style dead-code removal pass rather than
+        // inventing a fake tenant here.
         await saveDocument({
           id: args.id,
           title: args.title,
           content: draftContent,
           kind: config.kind,
           userId: args.session.user.id,
+          tenantId: "",
         });
       }
 
@@ -82,6 +87,7 @@ export function createDocumentHandler<T extends ArtifactKind>(config: {
           content: draftContent,
           kind: config.kind,
           userId: args.session.user.id,
+          tenantId: "",
         });
       }
 

@@ -1,5 +1,4 @@
 import { parse, unparse } from "papaparse";
-import { toast } from "sonner";
 import { Artifact } from "@/components/chat/create-artifact";
 import {
   CopyIcon,
@@ -9,6 +8,7 @@ import {
   UndoIcon,
 } from "@/components/chat/icons";
 import { SpreadsheetEditor } from "@/components/chat/sheet-editor";
+import { toast } from "@/components/chat/toast";
 
 type Metadata = Record<string, never>;
 
@@ -79,7 +79,7 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
         const cleanedCsv = unparse(nonEmptyRows);
 
         navigator.clipboard.writeText(cleanedCsv);
-        toast.success("Copied csv to clipboard!");
+        toast({ description: "Copied csv to clipboard!", type: "success" });
       },
     },
   ],

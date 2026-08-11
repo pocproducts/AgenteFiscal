@@ -2,8 +2,10 @@
 # Spanish Panel - Toda la startup en espanol
 schema: spec-driven
 change: spanish-panel
-status: tasks
+status: cancelled-archived
 created: 2026-08-03
+archived: 2026-08-05
+cancellation_reason: Spanish panel plan not implemented as designed; superseded by the frontend/monorepo restructure. artifact_store=openspec originally.
 author: gentle-orchestrator
 session_preflight:
   mode: auto

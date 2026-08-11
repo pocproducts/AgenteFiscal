@@ -68,6 +68,17 @@ export function sanitizeText(text: string) {
   return text.replace('<has_function_call>', '');
 }
 
+/** Fills `{key}` placeholders in a dictionary string, e.g. `interpolate(dict.saved, { name })`. */
+export function interpolate(
+  template: string,
+  vars: Record<string, string | number>
+): string {
+  return Object.entries(vars).reduce(
+    (result, [key, value]) => result.replaceAll(`{${key}}`, String(value)),
+    template
+  );
+}
+
 export function convertToUIMessages(messages: DBMessage[]): ChatMessage[] {
   return messages.map((message) => ({
     id: message.id,

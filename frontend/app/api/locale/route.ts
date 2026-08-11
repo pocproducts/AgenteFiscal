@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 
 const OPTIMUS_LANG = "optimus-lang";
 const MAX_AGE = 60 * 60 * 24 * 365; // 1 year

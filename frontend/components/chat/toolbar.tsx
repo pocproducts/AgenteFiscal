@@ -3,7 +3,6 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import cx from "classnames";
 import { motion, useMotionValue, useTransform } from "framer-motion";
 import { WrenchIcon, XIcon } from "lucide-react";
-import { nanoid } from "nanoid";
 import {
   type Dispatch,
   memo,
@@ -20,8 +19,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { ChatMessage } from "@/lib/types";
 import { useLanguage } from "@/lib/i18n";
+import type { ChatMessage } from "@/lib/types";
+import { generateUUID } from "@/lib/utils";
 import { type ArtifactKind, artifactDefinitions } from "./artifact";
 import type { ArtifactToolbarItem } from "./create-artifact";
 import { ArrowUpIcon, StopIcon, SummarizeIcon } from "./icons";
@@ -128,7 +128,7 @@ const Tool = ({
   );
 };
 
-const randomArr = [...new Array(6)].map((_x) => nanoid(5));
+const randomArr = [...new Array(6)].map(() => generateUUID());
 
 const ReadingLevelSelector = ({
   setSelectedTool,
@@ -327,7 +327,8 @@ const PureToolbar = ({
 
   const [selectedTool, setSelectedTool] = useState<string | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
-  const { t } = useLanguage();  useOnClickOutside(toolbarRef, () => {
+  const { t } = useLanguage();
+  useOnClickOutside(toolbarRef, () => {
     setIsToolbarVisible(false);
     setSelectedTool(null);
   });

@@ -106,6 +106,7 @@ export function DevelopersSection() {
       id="developers"
       ref={sectionRef}
     >
+      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static CRITICAL code animation CSS, no user/data input */}
       <style dangerouslySetInnerHTML={{ __html: codeAnimationStyles }} />
       <div className="max-w-[1400px] mx-auto px-6 lg:px-12">
         <div className="grid lg:grid-cols-2 gap-16 lg:gap-24 items-start">
@@ -230,16 +231,18 @@ export function DevelopersSection() {
             <div className="mt-6 flex items-center gap-6 text-sm">
               <a
                 className="text-foreground hover:underline underline-offset-4"
-                href="#"
+                href="/docs"
               >
                 {t.developers.readDocs}
               </a>
               <span className="text-foreground/20">|</span>
               <a
-                className="text-muted-foreground hover:text-foreground"
-                href="#"
+                className="text-foreground hover:underline underline-offset-4"
+                href="https://github.com/pocproducts/chatbot#readme"
+                rel="noreferrer"
+                target="_blank"
               >
-                {t.developers.viewGitHub}
+                {t.developers.readDocs}
               </a>
             </div>
           </div>

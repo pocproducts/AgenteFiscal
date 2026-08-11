@@ -81,13 +81,14 @@ function UsageChart({
       ? `${linePath} L${points.at(-1)?.x},${PAD.top + chartH} L${points[0].x},${PAD.top + chartH} Z`
       : "";
 
-  const yLabels = pointCount > 0
-    ? [
-        { value: 0, label: `$${maxAmount.toFixed(0)}` },
-        { value: maxAmount / 2, label: `$${(maxAmount / 2).toFixed(0)}` },
-        { value: maxAmount, label: "$0" },
-      ]
-    : [];
+  const yLabels =
+    pointCount > 0
+      ? [
+          { value: 0, label: `$${maxAmount.toFixed(0)}` },
+          { value: maxAmount / 2, label: `$${(maxAmount / 2).toFixed(0)}` },
+          { value: maxAmount, label: "$0" },
+        ]
+      : [];
 
   return (
     <div className="rounded-2xl border border-border/50 bg-card/60 p-5 shadow-sm">
@@ -247,7 +248,6 @@ export default function BillingSettingsPage() {
   const {
     data: billingData,
     usdBalance: currentBalance,
-    currentPlan,
     isLoading,
   } = useBilling();
 

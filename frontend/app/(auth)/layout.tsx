@@ -1,10 +1,10 @@
 import { ArrowLeftIcon } from "lucide-react";
-import Link from "next/link";
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { Suspense } from "react";
 import { SparklesIcon, VercelIcon } from "@/components/chat/icons";
 import { Preview } from "@/components/chat/preview";
-import { type Language } from "@/lib/i18n";
+import type { Language } from "@/lib/i18n";
 import { getDictionary } from "@/lib/i18n/server";
 
 export default function AuthLayout({
@@ -13,19 +13,13 @@ export default function AuthLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Suspense
-      fallback={<div className="flex h-dvh w-screen bg-sidebar" />}
-    >
+    <Suspense fallback={<div className="flex h-dvh w-screen bg-sidebar" />}>
       <AuthLayoutContent>{children}</AuthLayoutContent>
     </Suspense>
   );
 }
 
-async function AuthLayoutContent({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+async function AuthLayoutContent({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
   const raw = cookieStore.get("optimus-lang")?.value;
   const locale: Language = raw === "en" || raw === "es" ? raw : "es";

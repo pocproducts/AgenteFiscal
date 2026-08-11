@@ -1,0 +1,16 @@
+# openspec/changes/ui-backend-readiness/change.yaml
+# Remove frontend mock data and prepare typed data contracts + empty/loading
+# states so the panel UI (analytics, billing, dashboard/home, profiles) is ready
+# to be wired to the real backend module by module.
+schema: spec-driven
+change: ui-backend-readiness
+summary: Strip invented demo mock data (analytics PRNG snapshots, billing INITIAL_BILLING_STATE tokens/plan, hardcoded dashboard KPIs, profiles fixture) and replace with a typed domain-data layer (per-module snapshot interfaces + hooks returning loading/data/error) and well-defined empty/loading states in each view. The fiscal tools/agent flow (executors, composer->stream->monitor session persistence) is the production template and is KEPT untouched.
+status: proposed
+created: 2026-08-06
+updated: 2026-08-06
+author: gentle-orchestrator
+session_preflight:
+  mode: auto
+  artifact_store: openspec
+  delivery_strategy: single-pr
+  review_budget_lines: 800

@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/chat/toast";
 import { useArtifact } from "@/hooks/use-artifact";
 import { useLanguage } from "@/lib/i18n";
 import type { ArtifactKind } from "./artifact";
@@ -51,7 +51,7 @@ function PureDocumentToolResult({
       className="flex w-fit cursor-pointer flex-row items-center gap-2 rounded-xl border bg-background px-3 py-2"
       onClick={(event) => {
         if (isReadonly) {
-          toast.error(document.notSupported);
+          toast({ description: document.notSupported, type: "error" });
           return;
         }
 
@@ -117,7 +117,7 @@ function PureDocumentToolCall({
       className="cursor pointer flex w-fit flex-row items-start justify-between gap-3 rounded-xl border px-3 py-2"
       onClick={(event) => {
         if (isReadonly) {
-          toast.error(document.notSupported);
+          toast({ description: document.notSupported, type: "error" });
           return;
         }
 

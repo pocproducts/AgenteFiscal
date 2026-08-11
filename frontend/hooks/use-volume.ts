@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import useSWR from "swr";
 import { useAgentSidebar } from "@/hooks/use-agent-sidebar";
+import { useTenantKey } from "@/hooks/use-tenant-key";
 import { buildVolumeSeries } from "@/lib/dashboard/derive";
 import type { DashboardRange, VolumePoint } from "@/lib/dashboard/types";
 
@@ -13,12 +14,11 @@ import type { DashboardRange, VolumePoint } from "@/lib/dashboard/types";
  */
 export function useVolume(range: DashboardRange) {
   const { allSessions } = useAgentSidebar();
+  const key = useTenantKey(`dashboard-volume:${range}`);
 
-  const { data, error } = useSWR<VolumePoint[] | null>(
-    `dashboard-volume:${range}`,
-    null,
-    { fallbackData: null }
-  );
+  const { data, error } = useSWR<VolumePoint[] | null>(key, null, {
+    fallbackData: null,
+  });
 
   const volume = useMemo(
     () => buildVolumeSeries(allSessions, range),

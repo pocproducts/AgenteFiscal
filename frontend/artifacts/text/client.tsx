@@ -1,4 +1,3 @@
-import { toast } from "sonner";
 import { Artifact } from "@/components/chat/create-artifact";
 import { DiffView } from "@/components/chat/diffview";
 import { DocumentSkeleton } from "@/components/chat/document-skeleton";
@@ -11,6 +10,7 @@ import {
   UndoIcon,
 } from "@/components/chat/icons";
 import { Editor } from "@/components/chat/text-editor";
+import { toast } from "@/components/chat/toast";
 import type { Suggestion } from "@/lib/db/schema";
 import { getSuggestions } from "../actions";
 
@@ -147,7 +147,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
       description: "Copy to clipboard",
       onClick: ({ content }) => {
         navigator.clipboard.writeText(content);
-        toast.success("Copied to clipboard!");
+        toast({ description: "Copied to clipboard!", type: "success" });
       },
     },
   ],

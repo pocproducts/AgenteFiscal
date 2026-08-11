@@ -99,7 +99,7 @@ export function AnimatedTetrahedron() {
       const points: { x: number; y: number; z: number; char: string }[] = [];
 
       // Generate points along edges
-      edges.forEach(([i, j]) => {
+      for (const [i, j] of edges) {
         const v1 = vertices[i];
         const v2 = vertices[j];
 
@@ -125,10 +125,10 @@ export function AnimatedTetrahedron() {
             char: chars[Math.min(charIndex, chars.length - 1)],
           });
         }
-      });
+      }
 
       // Generate points on faces for a filled look
-      faces.forEach(([i, j, k]) => {
+      for (const [i, j, k] of faces) {
         const v1 = vertices[i];
         const v2 = vertices[j];
         const v3 = vertices[k];
@@ -158,17 +158,17 @@ export function AnimatedTetrahedron() {
             });
           }
         }
-      });
+      }
 
       // Sort by z for depth
       points.sort((a, b) => a.z - b.z);
 
       // Draw points
-      points.forEach((point) => {
+      for (const point of points) {
         const alpha = 0.15 + (point.z + 1.5) * 0.25;
         ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(alpha, 0.9)})`;
         ctx.fillText(point.char, point.x, point.y);
-      });
+      }
 
       time += 0.015;
       frameRef.current = requestAnimationFrame(render);

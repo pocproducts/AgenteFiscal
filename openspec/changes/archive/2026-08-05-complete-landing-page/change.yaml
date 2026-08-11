@@ -2,8 +2,10 @@
 # Complete Landing Page — Full Optimus Reference Match
 schema: spec-driven
 change: complete-landing-page
-status: tasks
+status: cancelled-archived
 created: 2026-07-06
+archived: 2026-08-05
+cancellation_reason: Landing redesign plan obsolete after the frontend/backend restructure; an older 2026-07-06 archive entry already covered the completed landing work.
 author: gentle-orchestrator
 session_preflight:
   mode: auto
