@@ -833,6 +833,40 @@ def report(
 	typer.echo('═' * 50)
 
 
+@app.command()
+def worker(
+	poll_interval: float = typer.Option(
+		5.0,
+		'--poll-interval',
+		'-i',
+		help='Segundos entre polls de report_runs queued',
+	),
+) -> None:
+	"""Run the in-process worker that executes queued report runs.
+
+	Polls ``report_runs`` rows with ``status='queued'`` and runs the heavy
+	pipeline in the background until interrupted with Ctrl-C.
+	"""
+	load_dotenv()
+	logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s', force=True)
+
+	from fiscal_agent.api.deps import get_engine, get_memory, get_pdf_gen
+	from fiscal_agent.db.session import async_session_factory
+	from fiscal_agent.worker.runner import ReportRunner
+
+	runner = ReportRunner(
+		session_factory=async_session_factory,
+		engine=get_engine(),
+		pdf_gen=get_pdf_gen(),
+		memory_client=get_memory(),
+	)
+	typer.echo('🚀 Worker iniciado — escuchando report_runs queued (Ctrl-C para detener)')
+	try:
+		asyncio.run(runner.run_loop(poll_interval=poll_interval))
+	except KeyboardInterrupt:
+		typer.echo('\nWorker detenido.')
+
+
 def main() -> None:
 	"""Entry point for ``python -m fiscal_agent``."""
 	app()

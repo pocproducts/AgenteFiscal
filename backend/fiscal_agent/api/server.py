@@ -40,6 +40,7 @@ from fiscal_agent.api.store import RedisStore, TenantStore
 from fiscal_agent.config import get_settings
 from fiscal_agent.db.session import async_session_factory, engine
 from fiscal_agent.models import ApiError, UnifiedResponse
+from fiscal_agent.worker.runner import start_worker
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 	app.state.engine = engine
 	app.state.session_factory = async_session_factory
 
-	yield  # Server is now serving
+	# Fase 3 — in-process worker: polls queued report_runs and executes the
+	# heavy pipeline in the background. Starts before serving, stops on shutdown.
+	async with start_worker(app):
+		yield
 
 	# Clean shutdown
 	if redis_client is not None:
