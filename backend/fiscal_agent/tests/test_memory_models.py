@@ -7,7 +7,7 @@ from datetime import datetime
 import pydantic
 import pytest
 
-from fiscal_agent.memory.models import (
+from fiscal_agent.adapters.memory.models import (
 	MemoryObservation,
 	MemoryObserveRequest,
 	MemoryQueryRequest,

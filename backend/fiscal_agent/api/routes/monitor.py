@@ -22,8 +22,8 @@ from fastapi import APIRouter, Query, Request
 
 from fiscal_agent.api.deps import get_memory
 from fiscal_agent.api.routes.health import _check_composio, _check_engram, _check_redis, _check_ta
-from fiscal_agent.memory import FiscalMemoryClient
-from fiscal_agent.models import (
+from fiscal_agent.adapters.memory import FiscalMemoryClient
+from fiscal_agent.domain.models import (
 	ActivityEvent,
 	ApiError,
 	ErrorEvent,

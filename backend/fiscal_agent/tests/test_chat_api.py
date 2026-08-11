@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from fiscal_agent.chat.intent_router import Intent
+from fiscal_agent.domain.intent_router import Intent
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────

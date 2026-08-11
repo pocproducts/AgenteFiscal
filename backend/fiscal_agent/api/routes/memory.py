@@ -16,9 +16,9 @@ import asyncio
 from fastapi import APIRouter
 
 from fiscal_agent.api.deps import get_memory
-from fiscal_agent.memory import FiscalMemoryClient
-from fiscal_agent.memory.models import MemoryObserveRequest
-from fiscal_agent.models import ApiError, UnifiedResponse
+from fiscal_agent.adapters.memory import FiscalMemoryClient
+from fiscal_agent.adapters.memory.models import MemoryObserveRequest
+from fiscal_agent.domain.models import ApiError, UnifiedResponse
 
 router = APIRouter()
 

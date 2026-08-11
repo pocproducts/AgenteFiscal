@@ -699,7 +699,7 @@ class PadronA5Result:
 			Todos los datos parseados con tipos validados.
 		"""
 		# Import tardío para evitar circular imports
-		from fiscal_agent.models import (
+		from fiscal_agent.domain.models import (
 			ActividadEconomica,
 			CategoriaContribuyente,
 			ComponenteSociedad,

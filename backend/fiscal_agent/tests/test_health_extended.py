@@ -19,7 +19,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from fiscal_agent.models import ServiceStatus
+from fiscal_agent.domain.models import ServiceStatus
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────────

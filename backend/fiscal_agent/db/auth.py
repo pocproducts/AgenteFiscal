@@ -34,7 +34,7 @@ from fiscal_agent.db.models.core import (
     TenantMember,
     User,
 )
-from fiscal_agent.models import Plan, PlanTier
+from fiscal_agent.domain.models import Plan, PlanTier
 
 logger = logging.getLogger(__name__)
 

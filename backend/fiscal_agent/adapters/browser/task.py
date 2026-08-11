@@ -12,11 +12,11 @@ import logging
 from abc import abstractmethod
 from dataclasses import field
 
-from fiscal_agent.tasks.base import BaseTask, TaskResult
+from fiscal_agent.adapters.tasks.base import BaseTask, TaskResult
 from typing import Any, Optional
 
-from fiscal_agent.browser.iibb_router import IIBBRouter
-from fiscal_agent.browser.workflows import TEMPLATE_FACILIDADES, TEMPLATE_FULL, TEMPLATE_LOGIN, TEMPLATE_REGISTRO
+from fiscal_agent.adapters.browser.iibb_router import IIBBRouter
+from fiscal_agent.adapters.browser.workflows import TEMPLATE_FACILIDADES, TEMPLATE_FULL, TEMPLATE_LOGIN, TEMPLATE_REGISTRO
 
 logger = logging.getLogger(__name__)
 

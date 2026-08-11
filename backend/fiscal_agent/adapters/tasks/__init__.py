@@ -1,7 +1,7 @@
 """Task system — unified protocol for all operations (browser, API, SOAP)."""
 
-from fiscal_agent.tasks.base import ApiTask, BaseTask, TaskResult
-from fiscal_agent.tasks.padron import PadronApiTask
+from fiscal_agent.adapters.tasks.base import ApiTask, BaseTask, TaskResult
+from fiscal_agent.adapters.tasks.padron import PadronApiTask
 
 __all__ = [
 	'ApiTask',

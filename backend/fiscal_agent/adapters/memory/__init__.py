@@ -1,8 +1,8 @@
 """Fiscal memory client — Engram + Redis cache layer for pipeline persistence."""
 
-from fiscal_agent.memory.client import FiscalMemoryClient
-from fiscal_agent.memory.config import MemoryConfig
-from fiscal_agent.memory.models import (
+from fiscal_agent.adapters.memory.client import FiscalMemoryClient
+from fiscal_agent.adapters.memory.config import MemoryConfig
+from fiscal_agent.adapters.memory.models import (
 	MemoryObservation,
 	MemoryObserveRequest,
 	MemoryQueryRequest,

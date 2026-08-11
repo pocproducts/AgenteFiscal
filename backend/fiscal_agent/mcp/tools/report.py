@@ -11,11 +11,11 @@ from pathlib import Path
 
 from mcp.server.fastmcp import Context
 
-from fiscal_agent.arca_ws import consultar_cuit
+from fiscal_agent.adapters.arca_ws import consultar_cuit
 from fiscal_agent.config import REPRESENTANTE_CUIT
 from fiscal_agent.config import get_settings
 from fiscal_agent.mcp.server import mcp
-from fiscal_agent.models import ApiError, UnifiedResponse
+from fiscal_agent.domain.models import ApiError, UnifiedResponse
 
 
 @mcp.tool()
@@ -91,7 +91,7 @@ async def get_report_pdf(
 		import asyncio
 
 		if con_deuda and browser is not None:
-			from fiscal_agent.browser import VencimientosDeudasTask
+			from fiscal_agent.adapters.browser import VencimientosDeudasTask
 
 			estudio_clave = get_settings().credentials.clave_fiscal
 			task = VencimientosDeudasTask(

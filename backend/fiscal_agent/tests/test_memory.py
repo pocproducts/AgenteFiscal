@@ -9,7 +9,7 @@ import fakeredis
 import pytest
 import redis as redis_lib
 
-from fiscal_agent.memory import FiscalMemoryClient, MemoryConfig
+from fiscal_agent.adapters.memory import FiscalMemoryClient, MemoryConfig
 
 
 # ═════════════════════════════════════════════════════════════════════════════════
@@ -84,7 +84,7 @@ class TestWriteMethods:
 
 	def test_save_padron_result(self, client: FiscalMemoryClient) -> None:
 		"""``save_padron_result`` posts to /observations with type=padron."""
-		with patch('fiscal_agent.memory.client.requests.post') as mock_post:
+		with patch('fiscal_agent.adapters.memory.client.requests.post') as mock_post:
 			mock_post.return_value = MagicMock(ok=True, status_code=200, content=b'{}', json=lambda: {'ok': True})
 
 			client.save_padron_result('20324837796', {'nombre': 'Test', 'tipo': 'responsable_inscripto'}, 'success')
@@ -93,7 +93,7 @@ class TestWriteMethods:
 
 	def test_save_extraction_result(self, client: FiscalMemoryClient) -> None:
 		"""``save_extraction_result`` posts to /observations with type=extraction_type."""
-		with patch('fiscal_agent.memory.client.requests.post') as mock_post:
+		with patch('fiscal_agent.adapters.memory.client.requests.post') as mock_post:
 			mock_post.return_value = MagicMock(ok=True, status_code=200, content=b'{}', json=lambda: {'ok': True})
 
 			client.save_extraction_result('20324837796', 'deuda', {'saldos': []}, 'success')
@@ -102,7 +102,7 @@ class TestWriteMethods:
 
 	def test_save_pdf_sent(self, client: FiscalMemoryClient) -> None:
 		"""``save_pdf_sent`` posts to /observations with type=pdf."""
-		with patch('fiscal_agent.memory.client.requests.post') as mock_post:
+		with patch('fiscal_agent.adapters.memory.client.requests.post') as mock_post:
 			mock_post.return_value = MagicMock(ok=True, status_code=200, content=b'{}', json=lambda: {'ok': True})
 
 			client.save_pdf_sent('20324837796', '/tmp/output.pdf', 'cliente@example.com', 'sent')
@@ -115,7 +115,7 @@ class TestWriteMethods:
 
 	def test_save_pipeline_error(self, client: FiscalMemoryClient) -> None:
 		"""``save_pipeline_error`` posts to /observations with type=error."""
-		with patch('fiscal_agent.memory.client.requests.post') as mock_post:
+		with patch('fiscal_agent.adapters.memory.client.requests.post') as mock_post:
 			mock_post.return_value = MagicMock(ok=True, status_code=200, content=b'{}', json=lambda: {'ok': True})
 
 			client.save_pipeline_error('20324837796', 'browser', 'Timeout connecting to Composio')
@@ -133,7 +133,7 @@ class TestSessionCreation:
 	def test_session_created_on_first_write(self) -> None:
 		"""Primer write de un CUIT crea su sesión (cuit-{cuit})."""
 		client = FiscalMemoryClient()
-		with patch('fiscal_agent.memory.client.requests.post') as mock_post:
+		with patch('fiscal_agent.adapters.memory.client.requests.post') as mock_post:
 
 			def side_effect(url, *a, **kw):
 				if '/sessions' in url:
@@ -159,7 +159,7 @@ class TestSessionCreation:
 	def test_session_cached_after_first_write(self) -> None:
 		"""Segundo write del mismo CUIT no crea la sesión de nuevo."""
 		client = FiscalMemoryClient()
-		with patch('fiscal_agent.memory.client.requests.post') as mock_post:
+		with patch('fiscal_agent.adapters.memory.client.requests.post') as mock_post:
 
 			def side_effect(url, *a, **kw):
 				if '/sessions' in url:
@@ -220,7 +220,7 @@ class TestReadMethods:
 				'content': '**Cuit**: 20324837796\n**Status**: success',
 			}
 		]
-		with patch('fiscal_agent.memory.client.requests.get') as mock_get:
+		with patch('fiscal_agent.adapters.memory.client.requests.get') as mock_get:
 			mock_get.return_value = self._mock_search_results(expected)
 
 			result = client.get_padron_history('20324837796')
@@ -233,7 +233,7 @@ class TestReadMethods:
 	def test_get_extraction_history(self, client: FiscalMemoryClient) -> None:
 		"""Returns list of extraction results filtered by type."""
 		expected = [{'id': 2, 'type': 'deuda', 'title': 'Extracción deuda: 20324837796'}]
-		with patch('fiscal_agent.memory.client.requests.get') as mock_get:
+		with patch('fiscal_agent.adapters.memory.client.requests.get') as mock_get:
 			mock_get.return_value = self._mock_search_results(expected)
 
 			result = client.get_extraction_history('20324837796', 'deuda')
@@ -245,7 +245,7 @@ class TestReadMethods:
 	def test_get_pipeline_history(self, client: FiscalMemoryClient) -> None:
 		"""Returns list of pipeline events."""
 		expected = [{'id': 3, 'type': 'padron'}, {'id': 4, 'type': 'error'}]
-		with patch('fiscal_agent.memory.client.requests.get') as mock_get:
+		with patch('fiscal_agent.adapters.memory.client.requests.get') as mock_get:
 			mock_get.return_value = self._mock_search_results(expected)
 
 			result = client.get_pipeline_history('20324837796')
@@ -257,7 +257,7 @@ class TestReadMethods:
 	def test_get_last_error_found(self, client: FiscalMemoryClient) -> None:
 		"""Returns the error observation whose content matches the stage."""
 		expected = {'id': 5, 'type': 'error', 'content': '**Cuit**: 20324837796\n**Stage**: browser\n**Error**: Timeout'}
-		with patch('fiscal_agent.memory.client.requests.get') as mock_get:
+		with patch('fiscal_agent.adapters.memory.client.requests.get') as mock_get:
 			# Return multiple errors — should filter by stage=browser
 			results = [
 				{'id': 4, 'type': 'error', 'content': '**Cuit**: 20324837796\n**Stage**: pdf\n**Error**: OOM'},
@@ -271,7 +271,7 @@ class TestReadMethods:
 
 	def test_get_last_error_none(self, client: FiscalMemoryClient) -> None:
 		"""Returns ``None`` when no errors exist."""
-		with patch('fiscal_agent.memory.client.requests.get') as mock_get:
+		with patch('fiscal_agent.adapters.memory.client.requests.get') as mock_get:
 			mock_get.return_value = self._mock_search_results([])
 
 			result = client.get_last_error('20324837796', 'browser')
@@ -298,7 +298,7 @@ class TestCacheTTLs:
 	def test_read_caches_padron(self, client: FiscalMemoryClient) -> None:
 		"""First read hits Engram, second read uses Redis cache."""
 		expected = [{'id': 1, 'type': 'padron', 'title': 'Padrón A5: 20324837796', 'content': '**Cuit**: 20324837796'}]
-		with patch('fiscal_agent.memory.client.requests.get') as mock_get:
+		with patch('fiscal_agent.adapters.memory.client.requests.get') as mock_get:
 			mock_resp = MagicMock()
 			mock_resp.json.return_value = expected  # /search returns list
 			mock_resp.content = json.dumps(expected).encode()
@@ -322,7 +322,7 @@ class TestCacheTTLs:
 
 	def test_write_does_not_cache(self, client: FiscalMemoryClient) -> None:
 		"""WRITE methods do NOT populate the Redis cache."""
-		with patch('fiscal_agent.memory.client.requests.post') as mock_post:
+		with patch('fiscal_agent.adapters.memory.client.requests.post') as mock_post:
 			mock_post.return_value = MagicMock(ok=True, status_code=200, content=b'{}')
 
 			client.save_padron_result('20324837796', {'nombre': 'Test'}, 'success')
@@ -332,7 +332,7 @@ class TestCacheTTLs:
 
 	def test_cache_expiration(self, client: FiscalMemoryClient) -> None:
 		"""Cache entries have the configured TTL."""
-		with patch('fiscal_agent.memory.client.requests.get') as mock_get:
+		with patch('fiscal_agent.adapters.memory.client.requests.get') as mock_get:
 			mock_resp = MagicMock()
 			mock_resp.json.return_value = [{'data': 'test'}]
 			mock_resp.content = b'[{"data": "test"}]'
@@ -347,7 +347,7 @@ class TestCacheTTLs:
 
 	def test_different_cuits_have_separate_cache(self, client: FiscalMemoryClient) -> None:
 		"""Cache keys are scoped by CUIT."""
-		with patch('fiscal_agent.memory.client.requests.get') as mock_get:
+		with patch('fiscal_agent.adapters.memory.client.requests.get') as mock_get:
 			mock_resp = MagicMock()
 			mock_resp.json.return_value = []
 			mock_resp.content = b'[]'
@@ -374,7 +374,7 @@ class TestBestEffort:
 
 	def test_write_silent_on_connection_error(self, client: FiscalMemoryClient) -> None:
 		"""WRITE methods swallow ``ConnectionError`` and return None."""
-		with patch('fiscal_agent.memory.client.requests.post', side_effect=ConnectionError('No route to host')):
+		with patch('fiscal_agent.adapters.memory.client.requests.post', side_effect=ConnectionError('No route to host')):
 			# Must not raise
 			client.save_padron_result('20324837796', {}, 'success')
 			client.save_extraction_result('20324837796', 'deuda', {}, 'success')
@@ -383,7 +383,7 @@ class TestBestEffort:
 
 	def test_read_returns_default_on_connection_error(self, client: FiscalMemoryClient) -> None:
 		"""READ methods return empty list / None on connection error."""
-		with patch('fiscal_agent.memory.client.requests.get', side_effect=ConnectionError('No route to host')):
+		with patch('fiscal_agent.adapters.memory.client.requests.get', side_effect=ConnectionError('No route to host')):
 			assert client.get_padron_history('20324837796') == []
 			assert client.get_extraction_history('20324837796', 'deuda') == []
 			assert client.get_pipeline_history('20324837796') == []
@@ -391,23 +391,23 @@ class TestBestEffort:
 
 	def test_requests_timeout(self, client: FiscalMemoryClient) -> None:
 		"""Timeout raises ``requests.Timeout`` which is also swallowed."""
-		with patch('fiscal_agent.memory.client.requests.post', side_effect=requests.Timeout('timed out')):
+		with patch('fiscal_agent.adapters.memory.client.requests.post', side_effect=requests.Timeout('timed out')):
 			client.save_padron_result('20324837796', {}, 'success')  # must not raise
 
 	def test_is_available_false_on_error(self, client: FiscalMemoryClient) -> None:
 		"""``is_available`` returns False on connection error."""
-		with patch('fiscal_agent.memory.client.requests.get', side_effect=ConnectionError('No route to host')):
+		with patch('fiscal_agent.adapters.memory.client.requests.get', side_effect=ConnectionError('No route to host')):
 			assert client.is_available() is False
 
 	def test_is_available_true_on_200(self, client: FiscalMemoryClient) -> None:
 		"""``is_available`` returns True on HTTP 200."""
-		with patch('fiscal_agent.memory.client.requests.get') as mock_get:
+		with patch('fiscal_agent.adapters.memory.client.requests.get') as mock_get:
 			mock_get.return_value = MagicMock(ok=True, status_code=200)
 			assert client.is_available() is True
 
 	def test_is_available_false_on_non_200(self, client: FiscalMemoryClient) -> None:
 		"""``is_available`` returns False on non-2xx status."""
-		with patch('fiscal_agent.memory.client.requests.get') as mock_get:
+		with patch('fiscal_agent.adapters.memory.client.requests.get') as mock_get:
 			mock_get.return_value = MagicMock(ok=False, status_code=503)
 			assert client.is_available() is False
 
@@ -461,7 +461,7 @@ class TestRedisHasSpace:
 		with (
 			patch.object(client._redis, 'info', side_effect=mock_info),
 			patch.object(client._redis, 'setex', wraps=client._redis.setex) as mock_setex,
-			patch('fiscal_agent.memory.client.requests.get') as mock_get,
+			patch('fiscal_agent.adapters.memory.client.requests.get') as mock_get,
 		):
 			mock_get.return_value = MagicMock(
 				ok=True,

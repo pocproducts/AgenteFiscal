@@ -10,7 +10,7 @@ from __future__ import annotations
 from mcp.server.fastmcp import Context
 
 from fiscal_agent.mcp.server import mcp
-from fiscal_agent.models import ApiError, UnifiedResponse
+from fiscal_agent.domain.models import ApiError, UnifiedResponse
 
 
 @mcp.tool()

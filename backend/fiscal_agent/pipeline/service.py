@@ -2,6 +2,10 @@
 
 Replaces the raw pipeline logic in ``_procesar_cliente_pipeline()``
 with a tested, injectable ``PipelineService`` class.
+
+Infrastructure dependencies (ARCA WS, email, settings, browser) are injected
+as ports; when a port is ``None`` the real adapter is constructed lazily so
+existing callers continue to work unchanged.
 """
 
 from __future__ import annotations
@@ -10,14 +14,9 @@ import logging
 from pathlib import Path
 from typing import Callable, Optional
 
-from fiscal_agent.arca_ws import consultar_cuit
-from fiscal_agent.config import REPRESENTANTE_CUIT, get_settings
-from fiscal_agent.email_sender import EmailSender
-from fiscal_agent.memory import FiscalMemoryClient
-from fiscal_agent.models import AppConfig, ClientConfig, TipoContribuyente, TipoPersona
-from fiscal_agent.pdf_generator import PdfGenerator
+from fiscal_agent.domain.models import AppConfig, ClientConfig, TipoContribuyente, TipoPersona
+from fiscal_agent.domain.rules_engine import RulesEngine
 from fiscal_agent.pipeline.models import PipelineResult
-from fiscal_agent.rules_engine import RulesEngine
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +29,7 @@ def _completar_cliente_desde_padron(
 	token: str,
 	sign: str,
 	representante_cuit: str,
+	padron_provider: Optional[Callable[..., object]],
 ) -> ClientConfig:
 	"""Completa campos faltantes de ClientConfig desde Padrón A5.
 
@@ -47,7 +47,7 @@ def _completar_cliente_desde_padron(
 	):
 		return cliente
 
-	result = consultar_cuit(cliente.cuit, token, sign, representante_cuit)
+	result = padron_provider(cliente.cuit, token, sign, representante_cuit)
 	output = result.to_output()
 	output_dict = result.to_dict()
 
@@ -80,7 +80,7 @@ def _completar_cliente_desde_padron(
 
 
 def _memory_save_extraction(
-	memory_client: FiscalMemoryClient,
+	memory_client: object,
 	cuit: str,
 	extraction_type: str,
 	parts: list[str],
@@ -116,17 +116,64 @@ class PipelineService:
 	WS API (Padrón A5) → Rules Engine → Browser extraction → PDF → Email.
 
 	Accepts dependencies via constructor injection for testability.
+	Infrastructure ports default to real adapters when omitted.
 	"""
 
 	def __init__(
 		self,
 		engine: RulesEngine,
-		pdf_gen: PdfGenerator,
-		memory_client: FiscalMemoryClient | None = None,
+		pdf_gen: object,
+		memory_client: object | None = None,
+		padron: object | None = None,
+		email_sender: object | None = None,
+		settings: object | None = None,
 	) -> None:
 		self._engine = engine
 		self._pdf_gen = pdf_gen
 		self._memory_client = memory_client
+		self._padron = padron
+		self._email_sender = email_sender
+		self._settings = settings
+
+	# ── Port resolution helpers (lazy real-adapter fallbacks) ────────────────
+
+	def _padron_provider(self) -> Callable[..., object]:
+		"""Return the ARCA padron query callable, building the adapter if needed."""
+		if self._padron is not None:
+			return self._padron
+		from fiscal_agent.adapters.arca_ws import consultar_cuit
+
+		return consultar_cuit
+
+	def _settings_obj(self) -> object:
+		"""Return the settings port, lazily resolving config when not injected."""
+		if self._settings is not None:
+			return self._settings
+		from fiscal_agent.config import get_settings
+
+		return get_settings()
+
+	def _representante_cuit(self) -> str:
+		"""CUIT del representante — from settings port or config fallback."""
+		settings = self._settings_obj()
+		return getattr(settings, 'representante_cuit', None) or getattr(
+			getattr(settings, 'credentials', None), 'cuit', ''
+		)
+
+	def _clave_fiscal(self) -> str:
+		"""Clave fiscal del estudio — from settings port or config fallback."""
+		settings = self._settings_obj()
+		return getattr(settings, 'clave_fiscal', None) or getattr(
+			getattr(settings, 'credentials', None), 'clave_fiscal', ''
+		)
+
+	def _email_sender_obj(self) -> object:
+		"""Return the email sender port, lazily building the adapter when needed."""
+		if self._email_sender is not None:
+			return self._email_sender
+		from fiscal_agent.adapters.email_sender import EmailSender
+
+		return EmailSender  # type: ignore[return-value]  # constructed below with smtp config
 
 	def run_pipeline(
 		self,
@@ -135,7 +182,7 @@ class PipelineService:
 		sign: str,
 		mes: int,
 		anio: int,
-		browser: Optional[ComposioBrowser] = None,
+		browser: Optional[object] = None,
 		*,
 		with_deuda: bool = False,
 		with_facilidades: bool = False,
@@ -159,6 +206,10 @@ class PipelineService:
 			cuit=cliente.cuit,
 		)
 
+		representante_cuit = self._representante_cuit()
+		estudio_clave = self._clave_fiscal()
+		padron_provider = self._padron_provider()
+
 		try:
 			# ── Memory: check recent padron history ─────────────────────────────
 			if self._memory_client is not None:
@@ -170,7 +221,7 @@ class PipelineService:
 
 			# ── WS API ──────────────────────────────────────────────────────────
 			progress_callback('  Consultando Padrón A5 ...')
-			padron_result = consultar_cuit(cliente.cuit, token, sign, REPRESENTANTE_CUIT)
+			padron_result = padron_provider(cliente.cuit, token, sign, representante_cuit)
 			output = padron_result.to_output()
 			resultado.ws_api = True
 			if self._memory_client is not None:
@@ -178,7 +229,13 @@ class PipelineService:
 			progress_callback(f'  Tipo: {output.datosGenerales.tipoPersona or "N/A"}')
 
 			# ── Auto-complete missing fields from Padrón A5 ────────────────────
-			cliente = _completar_cliente_desde_padron(cliente, token, sign, REPRESENTANTE_CUIT)
+			cliente = _completar_cliente_desde_padron(
+				cliente,
+				token,
+				sign,
+				representante_cuit,
+				padron_provider,
+			)
 			resultado.cliente = cliente.nombre or cliente.cuit
 			if cliente.nombre:
 				progress_callback(f'  Nombre: {cliente.nombre}')
@@ -198,16 +255,15 @@ class PipelineService:
 			deuda_output: object = None
 			rentas_matching: object = None
 			usa_browser_flag = with_deuda or with_facilidades or with_registro or with_iibb
-			estudio_clave = get_settings().credentials.clave_fiscal
 
 			tasks: list = []
-			from fiscal_agent.browser import FacilidadesTask, IIBBTask, RegistroTask, VencimientosDeudasTask
+			from fiscal_agent.adapters.browser import FacilidadesTask, IIBBTask, RegistroTask, VencimientosDeudasTask
 
 			if usa_browser_flag and browser is not None:
 				if with_deuda:
 					tasks.append(
 						VencimientosDeudasTask(
-							cuit=REPRESENTANTE_CUIT,
+							cuit=representante_cuit,
 							clave=estudio_clave,
 							cliente_cuit=cliente.cuit,
 						)
@@ -215,7 +271,7 @@ class PipelineService:
 				if with_facilidades:
 					tasks.append(
 						FacilidadesTask(
-							cuit=REPRESENTANTE_CUIT,
+							cuit=representante_cuit,
 							clave=estudio_clave,
 							cliente_cuit=cliente.cuit,
 						)
@@ -223,21 +279,21 @@ class PipelineService:
 				if with_registro:
 					tasks.append(
 						RegistroTask(
-							cuit=REPRESENTANTE_CUIT,
+							cuit=representante_cuit,
 							clave=estudio_clave,
 							cliente_cuit=cliente.cuit,
 						)
 					)
-			if with_iibb:
-				provincia_iibb = _derive_iibb_provincia(cliente)
-				tasks.append(
-					IIBBTask(
-						cuit=REPRESENTANTE_CUIT,
-						clave=estudio_clave,
-						cliente_cuit=cliente.cuit,
-						provincia=provincia_iibb or 'CORDOBA',
+				if with_iibb:
+					provincia_iibb = _derive_iibb_provincia(cliente)
+					tasks.append(
+						IIBBTask(
+							cuit=representante_cuit,
+							clave=estudio_clave,
+							cliente_cuit=cliente.cuit,
+							provincia=provincia_iibb or 'CORDOBA',
+						)
 					)
-				)
 
 			if tasks and browser is not None:
 				progress_callback(f'  Extrayendo vía Composio ({len(tasks)} task(s)) ...')
@@ -281,7 +337,7 @@ class PipelineService:
 
 			# ── Rentas Córdoba Matching ──────────────────────────────────────────
 			if deuda_output is not None and not browser_failed:
-				from fiscal_agent.matching import evaluar_rentas_cordoba
+				from fiscal_agent.domain.matching import evaluar_rentas_cordoba
 
 				rentas_matching = evaluar_rentas_cordoba(
 					provincias=cliente.provincias,
@@ -320,7 +376,11 @@ class PipelineService:
 					progress_callback('  ⚠️  Sin email configurado — salteando envío')
 				else:
 					progress_callback(f'  Enviando email a {cliente.email} ...')
-					sender = EmailSender(config.smtp)
+					sender_cls = self._email_sender_obj()
+					if config is not None:
+						sender = sender_cls(config.smtp)
+					else:
+						sender = sender_cls(None)
 					ok = sender.enviar(cliente, pdf_path, mes, anio)
 					resultado.email = ok
 					if self._memory_client is not None:
@@ -349,7 +409,7 @@ class PipelineService:
 				if cliente.cierre_ejercicio:
 					preview_lines.append(f'| **Cierre Ejercicio** | {cliente.cierre_ejercicio} |')
 				if cliente.provincias:
-					preview_lines.append(f'| **Provincia Fiscal** | {", ".join(cliente.provincias)} |')
+					preview_lines.append(f'| **Provincias** | {", ".join(cliente.provincias)} |')
 				preview_lines.append('')
 				preview_lines.append('---')
 				preview_lines.append('')

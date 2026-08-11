@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from fiscal_agent.arca_ws import consultar_cuit
-from fiscal_agent.tasks.base import ApiTask, TaskResult
+from fiscal_agent.adapters.arca_ws import consultar_cuit
+from fiscal_agent.adapters.tasks.base import ApiTask, TaskResult
 
 
 class PadronApiTask(ApiTask):

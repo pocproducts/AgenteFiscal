@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 import pytest
 
 from fiscal_agent.mcp.tools.memory import get_memory_history, save_memory_observation
-from fiscal_agent.memory.client import FiscalMemoryClient
-from fiscal_agent.models import UnifiedResponse
+from fiscal_agent.adapters.memory.client import FiscalMemoryClient
+from fiscal_agent.domain.models import UnifiedResponse
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────

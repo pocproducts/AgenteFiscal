@@ -28,7 +28,7 @@ from fiscal_agent.db.auth import (
     get_active_plan,
     resolve_or_create_tenant,
 )
-from fiscal_agent.models import Plan, PlanTier, Tenant
+from fiscal_agent.domain.models import Plan, PlanTier, Tenant
 
 logger = logging.getLogger(__name__)
 

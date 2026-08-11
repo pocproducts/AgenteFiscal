@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fiscal_agent.browser.task import (
+from fiscal_agent.adapters.browser.task import (
 	BrowserTask,
 	FacilidadesTask,
 	IIBBTask,

@@ -16,7 +16,7 @@ from typing import Optional
 
 from redis.asyncio import Redis
 
-from fiscal_agent.models import Plan
+from fiscal_agent.domain.models import Plan
 
 #: Default limits for plans without explicit config
 _DEFAULT_RPM = 10

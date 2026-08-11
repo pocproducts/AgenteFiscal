@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 from redis.asyncio import Redis
 
-from fiscal_agent.models import ApiKey, App, Developer, Plan, PlanTier, Tenant
+from fiscal_agent.domain.models import ApiKey, App, Developer, Plan, PlanTier, Tenant
 from fiscal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)

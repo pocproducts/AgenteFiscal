@@ -14,7 +14,7 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from typing import List, Optional
 
-from fiscal_agent.models import ClientConfig, SmtpConfig
+from fiscal_agent.domain.models import ClientConfig, SmtpConfig
 
 logger = logging.getLogger(__name__)
 

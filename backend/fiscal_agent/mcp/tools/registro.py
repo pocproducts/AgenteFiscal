@@ -10,11 +10,11 @@ import asyncio
 
 from mcp.server.fastmcp import Context
 
-from fiscal_agent.browser.factory import build_browser_tasks
+from fiscal_agent.adapters.browser.factory import build_browser_tasks
 from fiscal_agent.config import REPRESENTANTE_CUIT
 from fiscal_agent.config import get_settings
 from fiscal_agent.mcp.server import mcp
-from fiscal_agent.models import ApiError, UnifiedResponse
+from fiscal_agent.domain.models import ApiError, UnifiedResponse
 
 
 @mcp.tool()

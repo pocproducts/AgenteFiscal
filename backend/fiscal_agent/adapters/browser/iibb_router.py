@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from fiscal_agent.browser.workflows.iibb.cordoba import TEMPLATE_IIBB_CORDOBA
-from fiscal_agent.browser.workflows.iibb.jujuy import TEMPLATE_IIBB_JUJUY
+from fiscal_agent.adapters.browser.workflows.iibb.cordoba import TEMPLATE_IIBB_CORDOBA
+from fiscal_agent.adapters.browser.workflows.iibb.jujuy import TEMPLATE_IIBB_JUJUY
 
 
 class IIBBRouter:

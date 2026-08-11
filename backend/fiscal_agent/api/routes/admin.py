@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from fiscal_agent.api.store import RedisStore, TenantStore
-from fiscal_agent.models import ApiError, App, Developer, PlanTier, Tenant, UnifiedResponse
+from fiscal_agent.domain.models import ApiError, App, Developer, PlanTier, Tenant, UnifiedResponse
 
 router = APIRouter()
 

@@ -8,9 +8,9 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from fiscal_agent.api.deps import CERT_PATH, KEY_PATH, REPRESENTANTE_CUIT, get_engine, get_memory, get_pdf_gen, get_ta
-from fiscal_agent.arca_ws import consultar_cuit
+from fiscal_agent.adapters.arca_ws import consultar_cuit
 from fiscal_agent.config import get_settings
-from fiscal_agent.models import (
+from fiscal_agent.domain.models import (
 	ApiError,
 	AppConfig,
 	ClientConfig,
@@ -179,7 +179,7 @@ async def report(
 					cause='Falta COMPOSIO_API_KEY o ESTUDIO_CLAVE_FISCAL en .env',
 				),
 			)
-		from fiscal_agent.browser import ComposioBrowser
+		from fiscal_agent.adapters.browser import ComposioBrowser
 
 		browser = ComposioBrowser(
 			composio_api_key=composio_key,

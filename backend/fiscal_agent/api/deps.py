@@ -14,11 +14,11 @@ from typing import Optional
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fiscal_agent.arca_ws import get_ta
+from fiscal_agent.adapters.arca_ws import get_ta
 from fiscal_agent.config import CERT_DIR, CERT_PATH, KEY_PATH, REPRESENTANTE_CUIT, get_settings
-from fiscal_agent.memory import FiscalMemoryClient
-from fiscal_agent.pdf_generator import PdfGenerator
-from fiscal_agent.rules_engine import RulesEngine
+from fiscal_agent.adapters.memory import FiscalMemoryClient
+from fiscal_agent.adapters.pdf_generator import PdfGenerator
+from fiscal_agent.domain.rules_engine import RulesEngine
 
 logger = logging.getLogger(__name__)
 
@@ -71,4 +71,4 @@ async def get_db_session(request: Request) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-# get_ta imported from fiscal_agent.arca_ws — shared cache for CLI, API, MCP
+# get_ta imported from fiscal_agent.adapters.arca_ws — shared cache for CLI, API, MCP

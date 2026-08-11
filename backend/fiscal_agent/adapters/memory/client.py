@@ -10,8 +10,8 @@ from typing import Any
 import redis
 import requests
 
-from fiscal_agent.memory.config import MemoryConfig
-from fiscal_agent.models import PipelineRun
+from fiscal_agent.adapters.memory.config import MemoryConfig
+from fiscal_agent.domain.models import PipelineRun
 
 logger = logging.getLogger(__name__)
 

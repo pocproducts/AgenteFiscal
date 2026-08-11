@@ -23,12 +23,12 @@ from fiscal_agent.pipeline.service import PipelineService, _completar_cliente_de
 import typer
 import yaml
 
-from fiscal_agent.arca_ws import consultar_cuit, get_ta
-from fiscal_agent.email_sender import EmailSender
-from fiscal_agent.memory import FiscalMemoryClient
-from fiscal_agent.models import AppConfig, ClientConfig, TipoContribuyente, TipoPersona
-from fiscal_agent.pdf_generator import PdfGenerator
-from fiscal_agent.rules_engine import RulesEngine
+from fiscal_agent.adapters.arca_ws import consultar_cuit, get_ta
+from fiscal_agent.adapters.email_sender import EmailSender
+from fiscal_agent.adapters.memory import FiscalMemoryClient
+from fiscal_agent.domain.models import AppConfig, ClientConfig, TipoContribuyente, TipoPersona
+from fiscal_agent.adapters.pdf_generator import PdfGenerator
+from fiscal_agent.domain.rules_engine import RulesEngine
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +381,7 @@ def run(
 	# 5. Init browser (deferred import — solo si --with-deuda o --with-facilidades)
 	browser = None
 	if usa_browser:
-		from fiscal_agent.browser import ComposioBrowser
+		from fiscal_agent.adapters.browser import ComposioBrowser
 
 		browser = ComposioBrowser(
 			composio_api_key=composio_api_key,
@@ -477,7 +477,7 @@ def deuda(
 		typer.echo('   Obtenela en https://dashboard.composio.dev/settings')
 		raise typer.Exit(1)
 
-	from fiscal_agent.browser import ComposioBrowser
+	from fiscal_agent.adapters.browser import ComposioBrowser
 
 	deuda_resultados: list[dict] = []
 	extractor = ComposioBrowser(
@@ -581,7 +581,7 @@ def _descubrir_cliente(
 	Para el futuro modelo ``Individual``, cada cliente tendrá su propia
 	clave — es una feature pendiente.
 	"""
-	from fiscal_agent.arca_ws import consultar_cuit, get_ta
+	from fiscal_agent.adapters.arca_ws import consultar_cuit, get_ta
 
 	typer.echo(' Obteniendo TA ...')
 	token, sign = get_ta()
@@ -769,7 +769,7 @@ def report(
 	# 9. Init browser si necesario
 	browser = None
 	if usa_browser:
-		from fiscal_agent.browser import ComposioBrowser
+		from fiscal_agent.adapters.browser import ComposioBrowser
 
 		browser = ComposioBrowser(
 			composio_api_key=composio_api_key,

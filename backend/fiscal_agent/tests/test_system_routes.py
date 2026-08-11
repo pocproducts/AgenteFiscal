@@ -17,7 +17,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from fiscal_agent.models import UnifiedResponse
+from fiscal_agent.domain.models import UnifiedResponse
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ class TestSystemServices:
 		auth_header: dict,
 	) -> None:
 		"""Returns all four services."""
-		from fiscal_agent.models import ServiceStatus
+		from fiscal_agent.domain.models import ServiceStatus
 
 		from datetime import datetime
 

@@ -15,8 +15,8 @@ from fastapi import APIRouter, Request
 
 from fiscal_agent.api.deps import get_ta
 from fiscal_agent.config import get_settings
-from fiscal_agent.memory.config import MemoryConfig
-from fiscal_agent.models import ApiError, ServiceStatus, SystemHealth, UnifiedResponse
+from fiscal_agent.adapters.memory.config import MemoryConfig
+from fiscal_agent.domain.models import ApiError, ServiceStatus, SystemHealth, UnifiedResponse
 
 router = APIRouter()
 

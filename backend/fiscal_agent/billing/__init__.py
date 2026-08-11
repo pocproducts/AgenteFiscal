@@ -11,6 +11,6 @@ Uso:
     # → { plan: "estudio", duration_s: 120.5, steps: 15, costo_browser: 0.0, ... }
 """
 
-from fiscal_agent.billing.tiers import PlanTier, PLAN_RULES, calcular_costo
+from fiscal_agent.domain.tiers import PlanTier, PLAN_RULES, calcular_costo
 
 __all__ = ['PlanTier', 'PLAN_RULES', 'calcular_costo']

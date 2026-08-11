@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fiscal_agent.models import PlanTier
+from fiscal_agent.domain.models import PlanTier
 
 
 # ── Reglas de pricing por plan ───────────────────────────────────────────

@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from fiscal_agent.memory.client import FiscalMemoryClient
+from fiscal_agent.adapters.memory.client import FiscalMemoryClient
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────

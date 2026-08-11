@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from fiscal_agent.api.store import RedisStore
-from fiscal_agent.models import ApiError, UnifiedResponse
+from fiscal_agent.domain.models import ApiError, UnifiedResponse
 
 router = APIRouter(tags=['chat'])
 

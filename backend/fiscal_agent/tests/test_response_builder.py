@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from fiscal_agent.chat.intent_router import Intent
-from fiscal_agent.chat.response_builder import (
+from fiscal_agent.domain.intent_router import Intent
+from fiscal_agent.domain.response_builder import (
 	build_response,
 	format_calendario,
 	format_deuda,

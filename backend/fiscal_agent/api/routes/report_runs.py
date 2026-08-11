@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fiscal_agent.api.deps import get_db_session
 from fiscal_agent.db.models import ReportRun
-from fiscal_agent.models import ApiError, UnifiedResponse
+from fiscal_agent.domain.models import ApiError, UnifiedResponse
 
 router = APIRouter()
 

@@ -39,7 +39,7 @@ from fiscal_agent.api.routes import (
 from fiscal_agent.api.store import RedisStore, TenantStore
 from fiscal_agent.config import get_settings
 from fiscal_agent.db.session import async_session_factory, engine
-from fiscal_agent.models import ApiError, UnifiedResponse
+from fiscal_agent.domain.models import ApiError, UnifiedResponse
 from fiscal_agent.worker.runner import start_worker
 
 logger = logging.getLogger(__name__)

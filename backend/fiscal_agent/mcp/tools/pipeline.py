@@ -14,7 +14,7 @@ from mcp.server.fastmcp import Context
 from fiscal_agent.config import REPRESENTANTE_CUIT
 from fiscal_agent.pipeline.service import PipelineService
 from fiscal_agent.mcp.server import mcp
-from fiscal_agent.models import ApiError, ClientConfig, UnifiedResponse
+from fiscal_agent.domain.models import ApiError, ClientConfig, UnifiedResponse
 
 
 @mcp.tool()

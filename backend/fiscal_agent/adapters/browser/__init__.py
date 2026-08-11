@@ -3,9 +3,9 @@
 Composio Browser Tool — instrucciones NL en lugar de Playwright + YAML.
 """
 
-from fiscal_agent.browser.composio import ComposioBrowser
-from fiscal_agent.browser.factory import build_browser_tasks
-from fiscal_agent.browser.task import (
+from fiscal_agent.adapters.browser.composio import ComposioBrowser
+from fiscal_agent.adapters.browser.factory import build_browser_tasks
+from fiscal_agent.adapters.browser.task import (
 	BrowserTask,
 	FacilidadesTask,
 	IIBBTask,

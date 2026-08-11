@@ -16,9 +16,9 @@ from mcp.server.fastmcp import FastMCP
 
 from fiscal_agent.api.deps import get_ta
 from fiscal_agent.config import get_settings
-from fiscal_agent.memory import FiscalMemoryClient
-from fiscal_agent.pdf_generator import PdfGenerator
-from fiscal_agent.rules_engine import RulesEngine
+from fiscal_agent.adapters.memory import FiscalMemoryClient
+from fiscal_agent.adapters.pdf_generator import PdfGenerator
+from fiscal_agent.domain.rules_engine import RulesEngine
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
 	composio_key = creds.composio_api_key
 	if composio_key:
 		try:
-			from fiscal_agent.browser import ComposioBrowser
+			from fiscal_agent.adapters.browser import ComposioBrowser
 
 			estudio_cuit = creds.cuit
 			estudio_clave = creds.clave_fiscal

@@ -26,8 +26,8 @@ from typing import Any, Callable, Optional
 
 import requests
 
-from fiscal_agent.browser.workflows import TEMPLATE_FULL
-from fiscal_agent.models import (
+from fiscal_agent.adapters.browser.workflows import TEMPLATE_FULL
+from fiscal_agent.domain.models import (
 	ClientConfig,
 	DeudaDetail,
 	DeudaItem,
@@ -47,7 +47,7 @@ from fiscal_agent.models import (
 	VencimientoDeuda,
 )
 
-from fiscal_agent.browser.task import (
+from fiscal_agent.adapters.browser.task import (
 	BrowserTask,
 	FacilidadesTask,
 	VencimientosDeudasTask,

@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse
 
 from fiscal_agent.api.middleware.clerk import ClerkJWTExtractor
 from fiscal_agent.api.store import RedisStore, _KEY_APIKEY, _KEY_APP, _KEY_DEVELOPER, _KEY_KEYHASH
-from fiscal_agent.models import ApiError, ApiKey, App, Developer, Plan, UnifiedResponse
+from fiscal_agent.domain.models import ApiError, ApiKey, App, Developer, Plan, UnifiedResponse
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from fiscal_agent.api.store import RedisStore, _KEY_TENANT
-from fiscal_agent.models import Tenant
+from fiscal_agent.domain.models import Tenant
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):

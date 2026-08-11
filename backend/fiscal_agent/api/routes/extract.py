@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from fiscal_agent.api.deps import REPRESENTANTE_CUIT, get_memory
 from fiscal_agent.config import get_settings
-from fiscal_agent.models import ApiError, DeudaOutput, UnifiedResponse
+from fiscal_agent.domain.models import ApiError, DeudaOutput, UnifiedResponse
 
 router = APIRouter()
 
@@ -66,9 +66,9 @@ async def extract(
 			),
 		)
 
-	from fiscal_agent.browser import ComposioBrowser
-	from fiscal_agent.browser import FacilidadesTask, RegistroTask, VencimientosDeudasTask
-	from fiscal_agent.models import ClientConfig
+	from fiscal_agent.adapters.browser import ComposioBrowser
+	from fiscal_agent.adapters.browser import FacilidadesTask, RegistroTask, VencimientosDeudasTask
+	from fiscal_agent.domain.models import ClientConfig
 
 	browser = ComposioBrowser(
 		composio_api_key=composio_key,

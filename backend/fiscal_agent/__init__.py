@@ -1,7 +1,9 @@
 """Fiscal agent — Vertical AI Agent para calendarios impositivos ARCA."""
 
-from fiscal_agent.email_sender import EmailSender
-from fiscal_agent.models import (
+from fiscal_agent.adapters.email_sender import EmailSender
+from fiscal_agent.adapters.memory import FiscalMemoryClient
+from fiscal_agent.adapters.pdf_generator import PdfGenerator
+from fiscal_agent.domain.models import (
 	ActividadEconomica,
 	ApiError,
 	ApiKey,
@@ -37,7 +39,6 @@ from fiscal_agent.models import (
 	UnifiedResponse,
 	Vencimiento,
 )
-from fiscal_agent.pdf_generator import PdfGenerator
 
 __all__ = [
 	'ActividadEconomica',
@@ -60,6 +61,7 @@ __all__ = [
 	'DomicilioFiscal',
 	'ErrorConstancia',
 	'ErrorSeccion',
+	'FiscalMemoryClient',
 	'GrupoCuit',
 	'IdempotentRequest',
 	'ImpuestoInscripto',

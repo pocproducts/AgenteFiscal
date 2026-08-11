@@ -70,8 +70,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from fiscal_agent.api.store import RedisStore
-from fiscal_agent.chat.intent_router import Intent, detect
-from fiscal_agent.chat.response_builder import format_reporte_response, format_taxpayer_response
+from fiscal_agent.domain.intent_router import Intent, detect
+from fiscal_agent.domain.response_builder import format_reporte_response, format_taxpayer_response
 
 router = APIRouter()
 
@@ -148,7 +148,7 @@ class ChatResponse(BaseModel):
 def _handle_taxpayer(cuit: str) -> dict[str, Any] | None:
 	"""Consult taxpayer data via ARCA WS API (sync)."""
 	from fiscal_agent.api.deps import REPRESENTANTE_CUIT, get_ta
-	from fiscal_agent.arca_ws import consultar_cuit
+	from fiscal_agent.adapters.arca_ws import consultar_cuit
 
 	token, sign = get_ta()
 	if not token or not sign:
@@ -181,7 +181,7 @@ def _handle_reporte(cuit: str) -> dict[str, Any] | None:
 	from fiscal_agent.api.deps import REPRESENTANTE_CUIT, get_engine, get_memory, get_pdf_gen, get_ta
 	from fiscal_agent.cli import _procesar_cliente_pipeline
 	from fiscal_agent.config import get_settings
-	from fiscal_agent.models import ClientConfig
+	from fiscal_agent.domain.models import ClientConfig
 	from fiscal_agent.pipeline.service import PipelineService, _completar_cliente_desde_padron
 
 	token, sign = get_ta()
@@ -206,7 +206,7 @@ def _handle_reporte(cuit: str) -> dict[str, Any] | None:
 	with_browser = bool(creds.composio_api_key and creds.clave_fiscal)
 
 	if with_browser:
-		from fiscal_agent.browser import ComposioBrowser
+		from fiscal_agent.adapters.browser import ComposioBrowser
 
 		browser = ComposioBrowser(
 			composio_api_key=creds.composio_api_key,
@@ -255,7 +255,7 @@ def _handle_reporte_with_echo(
 	from fiscal_agent.api.deps import REPRESENTANTE_CUIT, get_engine, get_memory, get_pdf_gen, get_ta
 	from fiscal_agent.cli import _procesar_cliente_pipeline
 	from fiscal_agent.config import get_settings
-	from fiscal_agent.models import ClientConfig
+	from fiscal_agent.domain.models import ClientConfig
 	from fiscal_agent.pipeline.service import PipelineService, _completar_cliente_desde_padron
 
 	token, sign = get_ta()
@@ -280,7 +280,7 @@ def _handle_reporte_with_echo(
 	with_browser = bool(creds.composio_api_key and creds.clave_fiscal)
 
 	if with_browser:
-		from fiscal_agent.browser import ComposioBrowser
+		from fiscal_agent.adapters.browser import ComposioBrowser
 
 		browser = ComposioBrowser(
 			composio_api_key=creds.composio_api_key,
@@ -331,7 +331,7 @@ def _handle_wizard_pipeline(
 	from fiscal_agent.api.deps import REPRESENTANTE_CUIT, get_engine, get_memory, get_pdf_gen, get_ta
 	from fiscal_agent.cli import _procesar_cliente_pipeline
 	from fiscal_agent.config import get_settings
-	from fiscal_agent.models import ClientConfig
+	from fiscal_agent.domain.models import ClientConfig
 	from fiscal_agent.pipeline.service import _completar_cliente_desde_padron
 
 	token, sign = get_ta()
@@ -359,7 +359,7 @@ def _handle_wizard_pipeline(
 		if not (creds.composio_api_key and creds.clave_fiscal):
 			echo_func('  ⚠️  Credenciales de browser no configuradas — algunas tareas no estarán disponibles')
 		else:
-			from fiscal_agent.browser import ComposioBrowser
+			from fiscal_agent.adapters.browser import ComposioBrowser
 
 			browser = ComposioBrowser(
 				composio_api_key=creds.composio_api_key,
@@ -397,7 +397,7 @@ def _handle_wizard_pipeline(
 def _descubrir_cliente_desde_padron(cuit: str) -> dict | None:
 	"""Discover client info from padrón A5. Returns dict or None."""
 	from fiscal_agent.api.deps import REPRESENTANTE_CUIT, get_ta
-	from fiscal_agent.models import ClientConfig
+	from fiscal_agent.domain.models import ClientConfig
 	from fiscal_agent.pipeline.service import _completar_cliente_desde_padron
 
 	token, sign = get_ta()
@@ -451,7 +451,7 @@ async def chat_wizard(
 	def _buscar_en_yaml(cuit_raw: str) -> dict | None:
 		from pathlib import Path
 		import yaml
-		from fiscal_agent.models import AppConfig
+		from fiscal_agent.domain.models import AppConfig
 
 		config_path = Path('clients.yaml')
 		if not config_path.exists():
@@ -490,7 +490,7 @@ async def chat_wizard(
 
 	if cliente_info is None:
 		# Not found anywhere → error
-		from fiscal_agent.arca_ws import get_ta, get_ta_error
+		from fiscal_agent.adapters.arca_ws import get_ta, get_ta_error
 
 		token, sign = get_ta()
 		if not token or not sign:
@@ -538,10 +538,10 @@ async def chat_wizard(
 				)
 			)
 			data = await asyncio.to_thread(_handle_wizard_pipeline, cuit, tasks, _progress, request.send_email)
-			from fiscal_agent.chat.response_builder import format_reporte_response
+			from fiscal_agent.domain.response_builder import format_reporte_response
 
 			if data is None:
-				from fiscal_agent.arca_ws import get_ta_error
+				from fiscal_agent.adapters.arca_ws import get_ta_error
 
 				reply = format_reporte_response(data, cuit, arca_error=get_ta_error())
 			else:

@@ -16,9 +16,9 @@ import logging
 import unicodedata
 from typing import Any
 
-from fiscal_agent.memory.client import FiscalMemoryClient
-from fiscal_agent.memory.models import TenantContext
-from fiscal_agent.models import ImpuestoInscripto, RegistroImpuesto, RentasCordobaMatching
+from fiscal_agent.adapters.memory.client import FiscalMemoryClient
+from fiscal_agent.adapters.memory.models import TenantContext
+from fiscal_agent.domain.models import ImpuestoInscripto, RegistroImpuesto, RentasCordobaMatching
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ class TenantBrain:
 
 		# ── 5. Calendario fiscal ───────────────────────────────────────
 		try:
-			from fiscal_agent.rules_engine import RulesEngine
+			from fiscal_agent.domain.rules_engine import RulesEngine
 
 			engine = RulesEngine()
 			# Nota: el calendario necesita datos del padrón. Si padron falló,

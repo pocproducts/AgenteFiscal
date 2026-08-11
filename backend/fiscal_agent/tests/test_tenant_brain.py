@@ -11,9 +11,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fiscal_agent.memory.brain import TenantBrain
-from fiscal_agent.memory.client import FiscalMemoryClient
-from fiscal_agent.models import ImpuestoInscripto, RegistroImpuesto, RentasCordobaMatching
+from fiscal_agent.adapters.memory.brain import TenantBrain
+from fiscal_agent.adapters.memory.client import FiscalMemoryClient
+from fiscal_agent.domain.models import ImpuestoInscripto, RegistroImpuesto, RentasCordobaMatching
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ class TestBuildContextHappyPath:
 	def test_returns_tenant_context(self, brain: TenantBrain) -> None:
 		"""build_context returns a TenantContext instance."""
 		ctx = brain.build_context('20324837796')
-		from fiscal_agent.memory.models import TenantContext
+		from fiscal_agent.adapters.memory.models import TenantContext
 
 		assert isinstance(ctx, TenantContext)
 
@@ -240,7 +240,7 @@ class TestMatchRentas:
 
 	def test_identical_to_evaluar_rentas_cordoba(self, brain: TenantBrain) -> None:
 		"""Output debe ser idéntico al de evaluar_rentas_cordoba()."""
-		from fiscal_agent.matching import evaluar_rentas_cordoba
+		from fiscal_agent.domain.matching import evaluar_rentas_cordoba
 
 		provincias = ['Córdoba', 'Santa Fe']
 		impuestos = [ImpuestoInscripto(idImpuesto=5904)]

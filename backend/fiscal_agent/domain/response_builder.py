@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from fiscal_agent.models import RegistroOutput
+from fiscal_agent.domain.models import RegistroOutput
 
 
 def format_taxpayer_response(data: dict[str, Any] | None, cuit: str) -> str:

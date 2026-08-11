@@ -8,8 +8,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from fiscal_agent.api.deps import REPRESENTANTE_CUIT, get_engine, get_ta
-from fiscal_agent.arca_ws import consultar_cuit
-from fiscal_agent.models import ApiError, RulesOutput, UnifiedResponse
+from fiscal_agent.adapters.arca_ws import consultar_cuit
+from fiscal_agent.domain.models import ApiError, RulesOutput, UnifiedResponse
 
 router = APIRouter()
 

@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from fiscal_agent.api.store import RedisStore
-from fiscal_agent.chat.intent_router import Intent
+from fiscal_agent.domain.intent_router import Intent
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -185,7 +185,7 @@ class TestHistoryPrepend:
 
 	def test_history_prepend_adds_context(self) -> None:
 		"""History text is prepended so detect() sees prior CUIT."""
-		from fiscal_agent.chat.intent_router import detect
+		from fiscal_agent.domain.intent_router import detect
 
 		# Without history → no CUIT in message alone
 		_intent_no_history, cuit_no, _ = detect('y el calendario?')

@@ -28,11 +28,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from fiscal_agent.arca_ws import get_ta
-from fiscal_agent.browser import ComposioBrowser
+from fiscal_agent.adapters.arca_ws import get_ta
+from fiscal_agent.adapters.browser import ComposioBrowser
 from fiscal_agent.config import REPRESENTANTE_CUIT, get_settings
 from fiscal_agent.db.models import ReportRun
-from fiscal_agent.models import AppConfig, ClientConfig
+from fiscal_agent.domain.models import AppConfig, ClientConfig
 from fiscal_agent.pipeline.service import PipelineService
 
 logger = logging.getLogger(__name__)

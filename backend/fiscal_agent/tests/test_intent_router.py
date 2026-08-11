@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from fiscal_agent.chat.intent_router import Intent, detect
+from fiscal_agent.domain.intent_router import Intent, detect
 
 
 # ── CUIT extraction ─────────────────────────────────────────────────────────

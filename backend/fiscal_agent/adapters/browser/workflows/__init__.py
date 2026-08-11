@@ -8,12 +8,12 @@ Separados por etapa del pipeline ARCA:
     - iibb/: jurisdicciones IIBB desde el RUT (por provincia)
 """
 
-from fiscal_agent.browser.workflows.extract import TEMPLATE_EXTRACT
-from fiscal_agent.browser.workflows.facilidades import TEMPLATE_FACILIDADES
-from fiscal_agent.browser.workflows.full import TEMPLATE_FULL
-from fiscal_agent.browser.workflows.iibb import TEMPLATE_IIBB_CORDOBA, TEMPLATE_IIBB_JUJUY
-from fiscal_agent.browser.workflows.login import TEMPLATE_LOGIN
-from fiscal_agent.browser.workflows.registro import TEMPLATE_REGISTRO
+from fiscal_agent.adapters.browser.workflows.extract import TEMPLATE_EXTRACT
+from fiscal_agent.adapters.browser.workflows.facilidades import TEMPLATE_FACILIDADES
+from fiscal_agent.adapters.browser.workflows.full import TEMPLATE_FULL
+from fiscal_agent.adapters.browser.workflows.iibb import TEMPLATE_IIBB_CORDOBA, TEMPLATE_IIBB_JUJUY
+from fiscal_agent.adapters.browser.workflows.login import TEMPLATE_LOGIN
+from fiscal_agent.adapters.browser.workflows.registro import TEMPLATE_REGISTRO
 
 # Backward-compatible alias — old code using `from workflows import TEMPLATE_IIBB`
 # still works. Same string object (is check passes).

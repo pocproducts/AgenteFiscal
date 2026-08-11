@@ -38,7 +38,7 @@ from reportlab.platypus import (
 	TableStyle,
 )
 
-from fiscal_agent.models import (
+from fiscal_agent.domain.models import (
 	DeudaDetail,
 	DeudaItem,
 	DeudaOutput,
