@@ -24,7 +24,18 @@ from fiscal_agent.api.middleware import (
 	RequestMetricsStore,
 	TenantContextMiddleware,
 )
-from fiscal_agent.api.routes import admin, calendar, chat, conversations, extract, health, memory, monitor, report
+from fiscal_agent.api.routes import (
+	admin,
+	calendar,
+	chat,
+	conversations,
+	extract,
+	health,
+	memory,
+	monitor,
+	report,
+	report_runs,
+)
 from fiscal_agent.api.store import RedisStore, TenantStore
 from fiscal_agent.config import get_settings
 from fiscal_agent.db.session import async_session_factory, engine
@@ -217,6 +228,7 @@ app.openapi = custom_openapi
 app.include_router(health.router, tags=['health'])
 app.include_router(calendar.router, tags=['calendar'])
 app.include_router(report.router, tags=['report'])
+app.include_router(report_runs.router, tags=['report'])
 app.include_router(extract.router, tags=['extract'])
 app.include_router(memory.router, tags=['memory'])
 app.include_router(admin.router, tags=['admin'])
