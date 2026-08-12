@@ -1,7 +1,9 @@
 """Admin endpoints for developer self-service + tenant management.
 
 Endpoints use ``request.state`` populated by the auth middleware.
-New tenant CRUD endpoints require admin scopes.
+The dev/app/key CRUD is Postgres-backed through the hexagonal
+``ApiKeyRepository`` port; Redis ``TenantStore`` still backs the tenant
+management endpoints (out of the essential cutover scope).
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from fiscal_agent.api.store import RedisStore, TenantStore
 from fiscal_agent.domain.models import ApiError, App, Developer, PlanTier, Tenant, UnifiedResponse
+from fiscal_agent.ports.api_keys import ApiKeyRepository
 
 router = APIRouter()
 
@@ -108,10 +111,10 @@ def require_scope(scope: str):
 )
 async def register(body: RegisterRequest, req: Request):
 	"""Registra un nuevo desarrollador con una app por defecto y una API key."""
-	store: RedisStore = req.app.state.store  # type: ignore[attr-defined]
+	repo: ApiKeyRepository = req.app.state.api_key_port  # type: ignore[attr-defined]
 
 	# Check duplicate email
-	existing = await store.get_developer_by_email(body.email)
+	existing = await repo.get_developer_by_email(body.email)
 	if existing:
 		raise HTTPException(
 			status_code=409,
@@ -121,13 +124,33 @@ async def register(body: RegisterRequest, req: Request):
 			).model_dump(),
 		)
 
-	dev = await store.register_developer(name=body.name, email=body.email)
+	dev = await repo.register_developer(name=body.name, email=body.email)
 
 	# Create default app
-	app = await store.create_app(dev.id, 'Default App', 'sandbox')
+	app = await repo.create_app(dev.id, 'Default App', 'sandbox')
+	if app is None:
+		raise HTTPException(
+			status_code=400,
+			detail=UnifiedResponse(
+				status='error',
+				error=ApiError(
+					code='APP_CREATION_FAILED', cause='No se pudo crear la aplicación. Verificá que el desarrollador exista.'
+				),
+			).model_dump(),
+		)
 
 	# Create API key for the default app
-	key_result = await store.create_api_key(app.id)
+	key_result = await repo.create_api_key(app.id)
+	if key_result is None:
+		raise HTTPException(
+			status_code=400,
+			detail=UnifiedResponse(
+				status='error',
+				error=ApiError(
+					code='KEY_CREATION_FAILED', cause='No se pudo generar la API key para la aplicación creada.'
+				),
+			).model_dump(),
+		)
 
 	return UnifiedResponse(
 		status='success',
@@ -150,10 +173,10 @@ async def register(body: RegisterRequest, req: Request):
 )
 async def create_app_endpoint(body: CreateAppRequest, req: Request):
 	"""Crea una nueva aplicación para el desarrollador autenticado."""
-	store: RedisStore = req.app.state.store  # type: ignore[attr-defined]
+	repo: ApiKeyRepository = req.app.state.api_key_port  # type: ignore[attr-defined]
 	developer: Developer = req.state.developer  # type: ignore[attr-defined]
 
-	app = await store.create_app(developer.id, body.name, body.environment)
+	app = await repo.create_app(developer.id, body.name, body.environment)
 	if app is None:
 		raise HTTPException(
 			status_code=400,
@@ -178,13 +201,12 @@ async def create_app_endpoint(body: CreateAppRequest, req: Request):
 )
 async def create_key(body: CreateKeyRequest, req: Request):
 	"""Genera una nueva API key para una app del desarrollador autenticado."""
-	store: RedisStore = req.app.state.store  # type: ignore[attr-defined]
+	repo: ApiKeyRepository = req.app.state.api_key_port  # type: ignore[attr-defined]
 	developer: Developer = req.state.developer  # type: ignore[attr-defined]
 
 	# Check app ownership
-	app_key = 'tenant:app:{}'.format(body.app_id)
-	app_data = await store.redis.hgetall(app_key)
-	if not app_data:
+	app = await repo.get_app(body.app_id)
+	if app is None:
 		raise HTTPException(
 			status_code=404,
 			detail=UnifiedResponse(
@@ -192,7 +214,6 @@ async def create_key(body: CreateKeyRequest, req: Request):
 				error=ApiError(code='APP_NOT_FOUND', cause='App no encontrada'),
 			).model_dump(),
 		)
-	app = RedisStore._deserialize(App, app_data)
 	if app.developer_id != developer.id:
 		raise HTTPException(
 			status_code=404,
@@ -202,7 +223,7 @@ async def create_key(body: CreateKeyRequest, req: Request):
 			).model_dump(),
 		)
 
-	result = await store.create_api_key(body.app_id)
+	result = await repo.create_api_key(body.app_id)
 	if result is None:
 		raise HTTPException(
 			status_code=404,
@@ -228,10 +249,10 @@ async def create_key(body: CreateKeyRequest, req: Request):
 )
 async def list_keys(req: Request):
 	"""Lista todas las API keys del desarrollador autenticado (todos los apps)."""
-	store: RedisStore = req.app.state.store  # type: ignore[attr-defined]
+	repo: ApiKeyRepository = req.app.state.api_key_port  # type: ignore[attr-defined]
 	developer: Developer = req.state.developer  # type: ignore[attr-defined]
 
-	keys = await store.list_developer_keys(developer.id)
+	keys = await repo.list_developer_keys(developer.id)
 	return UnifiedResponse(status='success', result=keys)
 
 
@@ -327,7 +348,7 @@ async def create_tenant_api_key(req: Request, body: CreateApiKeyRequest | None =
 	El cuerpo es opcional — si se omite, la key se crea sin scopes.
 	Los scopes solicitados deben ser un subset de los scopes del plan.
 	"""
-	store: RedisStore = req.app.state.store  # type: ignore[attr-defined]
+	repo: ApiKeyRepository = req.app.state.api_key_port  # type: ignore[attr-defined]
 	tenant_id = req.state.tenant_id
 	auth_method = getattr(req.state, 'auth_method', None)
 
@@ -361,25 +382,16 @@ async def create_tenant_api_key(req: Request, body: CreateApiKeyRequest | None =
 				).model_dump(),
 			)
 
-	# Create or reuse tenant app (virtual container for grouping keys)
-	app_id = f'tapp_{tenant_id[:12]}'
-	app_key = f'tenant:app:{app_id}'
-	app_exists = await store.redis.hexists(app_key, 'id')
-	if not app_exists:
-		app = App(
-			id=app_id,
-			developer_id='sys_tenant',
-			name=f'Tenant {tenant_id[:8]}',
-			environment='production',
-			status='active',
+	# Keys are tenant-scoped — no virtual app container needed anymore.
+	result = await repo.create_api_key(app_id='', tenant_id=tenant_id, scopes=scopes)
+	if not result:
+		raise HTTPException(
+			status_code=500,
+			detail=UnifiedResponse(
+				status='error',
+				error=ApiError(code='SERVICE_UNAVAILABLE', cause='No se pudo crear la API key'),
+			).model_dump(),
 		)
-		await store.redis.hset(
-			app_key,
-			mapping=RedisStore._serialize_for_redis(app.model_dump(mode='json')),
-		)
-
-	# Create the API key
-	result = await store.create_api_key(app_id, tenant_id=tenant_id, scopes=scopes)
 
 	return UnifiedResponse(
 		status='success',
@@ -401,10 +413,10 @@ async def list_tenant_api_keys(req: Request):
 	NUNCA devuelve la full key — solo ``key_preview``, ``created_at``,
 	``scopes`` e ``is_active``.
 	"""
-	store: RedisStore = req.app.state.store  # type: ignore[attr-defined]
+	repo: ApiKeyRepository = req.app.state.api_key_port  # type: ignore[attr-defined]
 	tenant_id = req.state.tenant_id
 
-	keys = await store.list_tenant_keys(tenant_id)
+	keys = await repo.list_tenant_keys(tenant_id)
 	result = [
 		{
 			'key_preview': k.key_preview,
@@ -429,8 +441,8 @@ async def deactivate_tenant_api_key(key_id: str, req: Request):
 	estaba desactivada. Verifica que la key pertenezca al tenant
 	autenticado antes de desactivarla.
 	"""
-	store: RedisStore = req.app.state.store  # type: ignore[attr-defined]
+	repo: ApiKeyRepository = req.app.state.api_key_port  # type: ignore[attr-defined]
 	tenant_id = req.state.tenant_id
 
-	await store.deactivate_key(key_id, tenant_id)
+	await repo.deactivate_key(key_id, tenant_id)
 	return Response(status_code=204)

@@ -1,8 +1,8 @@
 # fiscal-agent (backend)
 
 Backend Python del chatbot — agente fiscal vertical para calendarios de vencimientos ARCA.
-Migrado desde `backend/Backend a migrar/` (paquete `fiscal_agent`) como parte del plan
-documentado en [`BACKEND-MIGRATION.md`](../BACKEND-MIGRATION.md).
+Migrado del backend legacy (paquete `fiscal_agent`, folder archivado en el cutover Phase 5)
+como parte del plan documentado en [`BACKEND-MIGRATION.md`](../BACKEND-MIGRATION.md).
 
 Consumido por el frontend Next.js en [`frontend/`](../frontend/).
 

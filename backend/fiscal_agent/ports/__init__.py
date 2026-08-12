@@ -5,6 +5,12 @@ Domain code and ``pipeline`` depend on these protocols, never on adapters.
 """
 
 from fiscal_agent.ports.arca import ArcaPort, PadronProvider, TicketProvider
+from fiscal_agent.ports.api_keys import (
+	ApiKeyContext,
+	ApiKeyPort,
+	ApiKeyRepository,
+	ApiKeyStoreUnavailableError,
+)
 from fiscal_agent.ports.browser import BrowserPort
 from fiscal_agent.ports.email import EmailSenderPort
 from fiscal_agent.ports.memory import (
@@ -17,6 +23,10 @@ from fiscal_agent.ports.settings import SettingsPort
 
 __all__ = [
 	'ArcaPort',
+	'ApiKeyContext',
+	'ApiKeyPort',
+	'ApiKeyRepository',
+	'ApiKeyStoreUnavailableError',
 	'BrowserPort',
 	'EmailSenderPort',
 	'MemoryPort',

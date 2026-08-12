@@ -1,7 +1,10 @@
 """AuthMiddleware — Bearer token + X-API-Key dual support.
 
-Resolves the full entity chain (ApiKey → App → Developer → Plan)
-via Redis and injects into ``request.state``.
+The ``fa_`` API-key path resolves the full entity chain
+(ApiKey → App → Developer → Plan) through the hexagonal
+:class:`fiscal_agent.ports.api_keys.ApiKeyPort` (Postgres-backed), and
+injects it into ``request.state``. Redis is no longer consulted for business
+data; it remains rate-limit/cache (and the Clerk JWKS cache).
 """
 
 from __future__ import annotations
@@ -13,9 +16,11 @@ from redis.asyncio import Redis
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse
 
+from fiscal_agent.adapters.db_api_keys import hash_api_key
 from fiscal_agent.api.middleware.clerk import ClerkJWTExtractor
-from fiscal_agent.api.store import RedisStore, _KEY_APIKEY, _KEY_APP, _KEY_DEVELOPER, _KEY_KEYHASH
-from fiscal_agent.domain.models import ApiError, ApiKey, App, Developer, Plan, UnifiedResponse
+from fiscal_agent.api.store import RedisStore  # type annotation for the kept signature
+from fiscal_agent.domain.models import ApiError, UnifiedResponse
+from fiscal_agent.ports.api_keys import ApiKeyPort, ApiKeyStoreUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -37,50 +42,39 @@ class AuthMiddleware(BaseHTTPMiddleware):
 	async def _resolve_api_key(self, raw_key: str, request: Request, redis: Redis, store: RedisStore) -> bool:
 		"""Resolve an API key (``fa_`` prefix) and inject developer/app/key/plan state.
 
+		The hash + lookup are delegated to the Postgres-backed
+		``ApiKeyPort`` (``request.app.state.api_key_port``). On DB
+		unavailability the port raises :class:`ApiKeyStoreUnavailableError`,
+		which the caller maps to the degraded 503 — never a crash.
+
+		State injected on success (same contract as the Redis era, plus the
+		Phase 5 improvement):
+		  - ``api_key`` / ``app`` / ``developer`` / ``plan`` — pydantic objects
+		  - ``tenant_id`` — UUID, now read directly from the ``ApiKey`` row
+		  - ``scopes`` — ``chat:read``/``chat:write``-style, from the plan
+		  - ``auth_method`` = ``'api_key'``
+		  - ``rate_limit_config`` — ``{'rpm': ..., 'rpd': ...}`` from the plan
+
 		Returns ``True`` on success, ``False`` on any failure.
 		"""
-		# ── SHA-256 → Redis lookup ────────────────────────────────────
-		key_hash = RedisStore._hash_key(raw_key)
-		api_key_id = await redis.get(_KEY_KEYHASH.format(key_hash))
-		if not api_key_id:
+		port: ApiKeyPort | None = getattr(request.app.state, 'api_key_port', None)
+		if port is None:
+			logger.error('No api_key_port configured — API-key auth unavailable')
 			return False
 
-		# ── Resolve ApiKey ────────────────────────────────────────────
-		api_key_data = await redis.hgetall(_KEY_APIKEY.format(api_key_id))
-		if not api_key_data:
-			return False
-		api_key: ApiKey = RedisStore._deserialize(ApiKey, api_key_data)
-
-		if not api_key.is_active:
+		ctx = await port.resolve(hash_api_key(raw_key))
+		if ctx is None:
 			return False
 
-		# ── Resolve App ───────────────────────────────────────────────
-		app_data = await redis.hgetall(_KEY_APP.format(api_key.app_id))
-		if not app_data:
-			return False
-		app: App = RedisStore._deserialize(App, app_data)
-
-		if app.status == 'suspended':
-			return False
-
-		# ── Resolve Developer ─────────────────────────────────────────
-		dev_data = await redis.hgetall(_KEY_DEVELOPER.format(app.developer_id))
-		if not dev_data:
-			return False
-		developer: Developer = RedisStore._deserialize(Developer, dev_data)
-
-		if not developer.is_active:
-			return False
-
-		# ── Resolve Plan ──────────────────────────────────────────────
-		plan = await store._resolve_plan(api_key.scopes)
-
-		# ── Inject state ──────────────────────────────────────────────
-		request.state.developer = developer
-		request.state.app = app
-		request.state.api_key = api_key
-		request.state.plan = plan
+		request.state.developer = ctx.developer
+		request.state.app = ctx.app
+		request.state.api_key = ctx.api_key
+		request.state.plan = ctx.plan
+		request.state.tenant_id = str(ctx.tenant_id) if ctx.tenant_id else None
+		request.state.tenant = None
+		request.state.scopes = list(ctx.scopes)
 		request.state.auth_method = 'api_key'
+		request.state.rate_limit_config = {'rpm': ctx.rpm, 'rpd': ctx.rpd}
 
 		return True
 
@@ -136,7 +130,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
 		store: RedisStore = request.app.state.store  # type: ignore[attr-defined]
 
 		if raw_key.startswith('fa_'):
-			ok = await self._resolve_api_key(raw_key, request, redis, store)
+			try:
+				ok = await self._resolve_api_key(raw_key, request, redis, store)
+			except ApiKeyStoreUnavailableError:
+				# Postgres down for the key-resolution path → same degraded
+				# 503 the Redis outage path uses, never a 500.
+				logger.error('Postgres unavailable for API-key auth — returning 503')
+				return JSONResponse(
+					status_code=503,
+					content=UnifiedResponse(
+						status='error',
+						error=ApiError(code='SERVICE_UNAVAILABLE', cause='Servicio temporalmente no disponible'),
+					).model_dump(),
+				)
 		else:
 			factory = getattr(request.app.state, 'session_factory', None)
 			extractor = ClerkJWTExtractor(factory)

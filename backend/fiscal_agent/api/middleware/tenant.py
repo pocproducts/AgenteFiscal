@@ -1,7 +1,13 @@
-"""TenantContextMiddleware — resolve tenant from api_key.tenant_id.
+"""TenantContextMiddleware — retained for middleware-stack stability.
 
-Non-blocking enrichment middleware. NEVER returns an error — silently
-sets ``request.state.tenant = None`` and passes through.
+Cutover Phase 5: tenant context is resolved by the auth layer itself —
+``AuthMiddleware`` sets ``request.state.tenant_id`` / ``scopes`` from the
+Postgres ``ApiKey`` row for the API-key path, and ``ClerkJWTExtractor`` sets
+``tenant``/``tenant_id``/``scopes``/``plan`` for the Clerk path. Redis no
+longer holds tenant business data (it is rate-limit/cache + conversations
+only), so this middleware is now an explicit no-op passthrough.
+
+Non-blocking by design: it NEVER returns an error.
 """
 
 from __future__ import annotations
@@ -9,29 +15,10 @@ from __future__ import annotations
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
-from fiscal_agent.api.store import RedisStore, _KEY_TENANT
-from fiscal_agent.domain.models import Tenant
-
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
-	"""Read ``api_key.tenant_id``, fetch ``Tenant`` from Redis, inject state."""
+	"""No-op context enricher — keeps the middleware ordering stable."""
 
 	async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-		request.state.tenant = None  # default
-
-		# ClerkJWTExtractor already sets tenant_id (and tenant) directly
-		if getattr(request.state, 'auth_method', None) == 'clerk_jwt':
-			return await call_next(request)
-
-		# For API key auth, resolve tenant from api_key.tenant_id
-		api_key = getattr(request.state, 'api_key', None)
-		if api_key is not None and api_key.tenant_id is not None:
-			redis = request.app.state.redis  # type: ignore[attr-defined]
-			tenant_data = await redis.hgetall(_KEY_TENANT.format(api_key.tenant_id))
-			if tenant_data:
-				tenant = RedisStore._deserialize(Tenant, tenant_data)
-				request.state.tenant = tenant
-				request.state.tenant_id = api_key.tenant_id
-				request.state.scopes = api_key.scopes or []
-
+		request.state.tenant = getattr(request.state, 'tenant', None)
 		return await call_next(request)

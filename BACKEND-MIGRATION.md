@@ -8,8 +8,13 @@
 
 ## 1. Objective
 
-Migrate the existing fiscal agent backend (`backend/Backend a migrar`, package `fiscal_agent`)
+Migrate the existing fiscal agent backend (the archived legacy backend, package `fiscal_agent`)
 into the monorepo so it becomes the real backend for the Next.js frontend (`frontend/`).
+
+> Cutover Phase 5 (completed): the legacy backend folder was archived/deleted. Its
+> business data (API keys/apps/plans/developers) now lives in Postgres behind the
+> hexagonal `fiscal_agent.ports.api_keys` port; Redis remains rate-limit/cache +
+> best-effort conversations.
 
 The migration is **incremental (strangler fig)** — never a big-bang rewrite.
 
@@ -31,7 +36,7 @@ instead of shipping its own tenant store (`api/store.py` Redis tenants) into pro
 
 ---
 
-## 2. Current state of `backend/Backend a migrar`
+## 2. Current state of the legacy backend
 
 - **Stack**: FastAPI 2.0.0, Pydantic v2, Typer CLI, Redis (`redis.asyncio`) as the **main data store**,
   Engram (HTTP `localhost:7437`) as per-CUIT memory, ReportLab PDFs, SMTP email, Composio cloud browser.
@@ -201,7 +206,7 @@ Order = edge first, center last. Each phase is independently shippable and rever
 - [ ] Pin Python version (3.12) and export a real `backend/pyproject.toml` (uv) from current imports.
 - [ ] Create `backend/pyproject.toml`, `backend/README.md`, `backend/.env.example`.
 - [ ] Add a Dockerfile (multi-stage) + healthcheck.
-- [ ] Copy `backend/Backend a migrar` → `backend/fiscal_agent/` as the working tree.
+- [x] Copy the archived legacy working tree → `backend/fiscal_agent/` as the working tree (done in Phase 0).
 - [ ] Run existing tests to establish a green baseline.
 
 ### Phase 1 — Data layer: Postgres (3–5 days)
@@ -235,7 +240,7 @@ Order = edge first, center last. Each phase is independently shippable and rever
 - [ ] Feature-flag / canary: route a tenant to the new backend while others stay on the old path.
 - [ ] Drain Redis business-data keys; verify no production reads.
 - [ ] Remove old `api/store.py` tenant code paths.
-- [ ] Archive/delete `backend/Backend a migrar` after a full regression pass.
+- [x] Archive/delete the legacy backend folder after a full regression pass (done in cutover Phase 5).
 
 ---
 
@@ -336,7 +341,7 @@ API_BASE_URL=https://api.example.com
 
 ## 10. Testing strategy
 
-- **Port existing tests** (`backend/Backend a migrar/tests/`) into `backend/fiscal_agent/tests/` and keep them green per phase.
+- **Port existing tests** (the legacy `tests/` layout) into `backend/fiscal_agent/tests/` and keep them green per phase.
 - **Gaps to fill** (currently uncovered): `arca_ws`, `pdf_generator`, `browser/composio`, `rules_engine`, `billing`.
   - `rules_engine` and `billing` are pure — write table-driven unit tests FIRST (cheap, high value).
   - `arca_ws` and `browser` → integration tests behind env flags, never in CI defaults.

@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
+from fiscal_agent.adapters.db_api_keys import PostgresApiKeyPort
 from fiscal_agent.api.middleware import (
 	AuthMiddleware,
 	RateLimitMiddleware,
@@ -64,9 +65,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 		app.state.store = store
 		app.state.tenant_store = tenant_store
 
-		# Seed if empty
-		await store.seed_defaults()
-		await tenant_store.seed_defaults()
+		# NOTE (cutover Phase 5): Redis no longer seeds business data (plans,
+		# developers, apps, API keys, tenants) — the source of truth is
+		# Postgres. Redis keeps rate limiting + best-effort conversations.
+		# ``RedisStore``/``TenantStore`` seed_defaults() are archived.
 	except Exception as exc:
 		logger.warning('Redis init falló — arrancando degradado: %s', exc)
 		app.state.redis = None
@@ -76,6 +78,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 	# Postgres (Fase 1) — lazy async engine, no eager connect.
 	app.state.engine = engine
 	app.state.session_factory = async_session_factory
+
+	# Cutover Phase 5 — API key resolution/admin CRUD goes through the
+	# hexagonal port (Postgres), never Redis.
+	app.state.api_key_port = PostgresApiKeyPort(async_session_factory)
 
 	# Fase 3 — in-process worker: polls queued report_runs and executes the
 	# heavy pipeline in the background. Starts before serving, stops on shutdown.
