@@ -252,7 +252,11 @@ class ReportRunner:
 		)
 
 	async def _fetch_next_queued(self) -> Optional[UUID]:
-		"""Return the id of the oldest ``queued`` run, or ``None``."""
+		"""Return the id of the oldest ``queued`` run, or ``None``.
+
+		Read-only peek: does NOT lock or flip anything. The poll loop claims
+		via :meth:`claim_next_queued`, which is the race-free path.
+		"""
 		async with self._session_factory() as session:
 			stmt = (
 				select(ReportRun.id)
@@ -263,6 +267,37 @@ class ReportRunner:
 			result = await session.execute(stmt)
 			row = result.first()
 			return row[0] if row else None
+
+	async def claim_next_queued(self) -> Optional[UUID]:
+		"""Atomically claim the oldest ``queued`` run for THIS worker.
+
+		Runs ``SELECT ... FOR UPDATE SKIP LOCKED`` and the ``queued -> running``
+		flip inside ONE transaction, committed before returning. Exactly one of
+		N concurrent workers (e.g. the two uvicorn processes spawned by
+		``--workers 2``) can ever see a given row: the row lock is held from
+		SELECT time until commit, so a competing worker skips it via
+		``SKIP LOCKED`` and no double execution is possible.
+
+		The ``ORDER BY created_at, id`` is preserved inside the locking query,
+		so the oldest unclaimed run is picked while honoring first-in-first-out.
+
+		Returns the claimed run id, or ``None`` when no ``queued`` row remains.
+		"""
+		async with self._session_factory() as session:
+			stmt = (
+				select(ReportRun)
+				.where(ReportRun.status == 'queued')
+				.order_by(ReportRun.created_at.asc(), ReportRun.id)
+				.limit(1)
+				.with_for_update(skip_locked=True)
+			)
+			run = (await session.execute(stmt)).scalar_one_or_none()
+			if run is None:
+				return None
+			run.status = 'running'
+			run.started_at = datetime.now(timezone.utc)
+			await session.commit()
+			return run.id
 
 	async def run_loop(
 		self,
@@ -276,7 +311,7 @@ class ReportRunner:
 		logger.info('ReportRunner loop started (poll_interval=%ss)', poll_interval)
 		while stop_event is None or not stop_event.is_set():
 			try:
-				run_id = await self._fetch_next_queued()
+				run_id = await self.claim_next_queued()
 				if run_id is not None:
 					logger.info('Processing queued report run %s', run_id)
 					await self.process_run(run_id)

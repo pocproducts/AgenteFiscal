@@ -102,13 +102,14 @@ async def _check_ta() -> ServiceStatus:
 
 	certs_ok = CERT_PATH.exists() and KEY_PATH.exists()
 	if not certs_ok:
+		missing = [str(p) for p in (CERT_PATH, KEY_PATH) if not p.exists()]
 		latency = (time.monotonic() - start) * 1000
 		return ServiceStatus(
 			name='ta',
 			status='down',
 			last_check=datetime.now(timezone.utc),
 			latency_ms=round(latency, 2),
-			error='Certificados ARCA no encontrados',
+			error=f'Certificados ARCA no encontrados: {", ".join(missing)}',
 		)
 
 	token, _ = get_ta()

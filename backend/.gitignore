@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
 
 # Env
 .env
@@ -16,4 +17,5 @@ __pycache__/
 # App runtime
 .certificados-arca/
 storage/
+artifacts/backups/
 *.log

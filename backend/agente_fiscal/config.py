@@ -98,6 +98,13 @@ class AppSettings(BaseSettings):
 			return [origin.strip() for origin in v.split(',') if origin.strip()]
 		return v
 
+	# ── ARCA certificate paths ─────────────────────────────────────────
+	cert_dir: str = Field(
+		default='.certificados-arca',
+		alias='CERT_DIR',
+		description='Directory holding produccion.crt / produccion.key',
+	)
+
 	# ── Flattened credentials ──────────────────────────────────────────
 	cuit: str = Field(default='20324837796', alias='ESTUDIO_CUIT')
 	clave_fiscal: str = Field(default='', alias='ESTUDIO_CLAVE_FISCAL')
@@ -178,7 +185,21 @@ settings = get_settings()
 
 # ── Shared constants ──────────────────────────────────────────────────────────────
 
-CERT_DIR = Path('.certificados-arca')
-CERT_PATH = CERT_DIR / 'produccion.crt'
-KEY_PATH = CERT_DIR / 'produccion.key'
+
+def resolve_cert_paths(cert_dir: str | None = None) -> tuple[Path, Path, Path]:
+	"""Resolve the ARCA certificate directory + cert/key file paths.
+
+	``cert_dir`` defaults to the ``CERT_DIR`` setting (env var or ``.env``),
+	itself defaulting to ``.certificados-arca`` relative to the process CWD —
+	existing deployments that never set ``CERT_DIR`` keep working unchanged.
+
+	Returns a ``(CERT_DIR, CERT_PATH, KEY_PATH)`` tuple so callers can keep
+	using the module-level constants or resolve paths dynamically (e.g. tests
+	or a custom cert directory) via this helper.
+	"""
+	base = Path(cert_dir) if cert_dir else Path(get_settings().cert_dir)
+	return base, base / 'produccion.crt', base / 'produccion.key'
+
+
+CERT_DIR, CERT_PATH, KEY_PATH = resolve_cert_paths()
 REPRESENTANTE_CUIT = get_settings().credentials.cuit

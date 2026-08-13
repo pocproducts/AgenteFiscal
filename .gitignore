@@ -26,3 +26,7 @@ yarn-error.log*
 next-env.d.ts
 tsconfig.tsbuildinfo
 .data/
+
+# ARCA certs + app runtime storage — apply even when CWD is the repo root
+.certificados-arca/
+storage/
