@@ -1,7 +1,7 @@
-# fiscal-agent (backend)
+# agente-fiscal (backend)
 
-Backend Python del chatbot — agente fiscal vertical para calendarios de vencimientos ARCA.
-Migrado del backend legacy (paquete `fiscal_agent`, folder archivado en el cutover Phase 5)
+Backend Python de Agente Fiscal — agente fiscal vertical para calendarios de vencimientos ARCA.
+Migrado del backend legacy (paquete `agente_fiscal`, folder archivado en el cutover Phase 5)
 como parte del plan documentado en [`BACKEND-MIGRATION.md`](../BACKEND-MIGRATION.md).
 
 Consumido por el frontend Next.js en [`frontend/`](../frontend/).
@@ -35,7 +35,7 @@ Copiá `backend/.env.example` a `backend/.env` y completá las variables.
 ## Correr la API
 
 ```bash
-uv run uvicorn fiscal_agent.api.server:app --reload
+uv run uvicorn agente_fiscal.api.server:app --reload
 ```
 
 Health check: `http://localhost:8000/health`
@@ -43,8 +43,8 @@ Health check: `http://localhost:8000/health`
 ## CLI
 
 ```bash
-uv run python -m fiscal_agent --help
-uv run python -m fiscal_agent run --config clients.yaml
+uv run python -m agente_fiscal --help
+uv run python -m agente_fiscal run --config clients.yaml
 ```
 
 ## Tests
@@ -60,8 +60,8 @@ Los tests que dependen de servicios externos (Redis real, Engram, Composio) usan
 
 ```bash
 cd backend
-docker build -t fiscal-agent .
-docker run -p 8000:8000 --env-file .env fiscal-agent
+docker build -t agente-fiscal .
+docker run -p 8000:8000 --env-file .env agente-fiscal
 ```
 
 ## Enlaces

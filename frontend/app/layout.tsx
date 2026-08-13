@@ -19,8 +19,8 @@ import "./globals.css";
 // prerenderable routes).
 export const metadata: Metadata = {
   metadataBase: new URL("https://chat.vercel.ai"),
-  title: "Asistente Fiscal",
-  description: "Asistente fiscal basado en el SDK de IA de Next.js.",
+  title: "Agente Fiscal",
+  description: "Agente fiscal basado en el SDK de IA de Next.js.",
 };
 
 export const viewport = {

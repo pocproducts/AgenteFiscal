@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm --filter frontend dev",
-    "build": "pnpm --filter frontend build",
-    "start": "pnpm --filter frontend start",
-    "check": "pnpm --filter frontend check",
-    "fix": "pnpm --filter frontend fix",
-    "test": "pnpm --filter frontend test"
+    "dev": "pnpm --filter agente-fiscal-frontend dev",
+    "build": "pnpm --filter agente-fiscal-frontend build",
+    "start": "pnpm --filter agente-fiscal-frontend start",
+    "check": "pnpm --filter agente-fiscal-frontend check",
+    "fix": "pnpm --filter agente-fiscal-frontend fix",
+    "test": "pnpm --filter agente-fiscal-frontend test"
   }
 }

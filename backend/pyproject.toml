@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "fiscal-agent"
+name = "agente-fiscal"
 version = "0.1.0"
-description = "Vertical AI Agent Fiscal — calendarios de vencimientos ARCA, pipeline, API y CLI"
+description = "Agente Fiscal — calendarios de vencimientos ARCA, pipeline, API y CLI"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.scripts]
-fiscal-agent = "fiscal_agent.cli:main"
+agente-fiscal = "agente_fiscal.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -49,11 +49,11 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["fiscal_agent"]
+packages = ["agente_fiscal"]
 
 [tool.hatch.build.targets.sdist]
-include = ["fiscal_agent"]
+include = ["agente_fiscal"]
 
 [tool.pytest.ini_options]
-testpaths = ["fiscal_agent/tests"]
+testpaths = ["agente_fiscal/tests"]
 asyncio_mode = "auto"

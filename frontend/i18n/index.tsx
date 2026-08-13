@@ -15,8 +15,8 @@ export type LanguageContextValue = {
 // app/layout.tsx (es) because reading cookies() in generateMetadata breaks
 // prerenderable routes in Next 16; the toggle updates the title client-side.
 const DOCUMENT_TITLES: Record<Language, string> = {
-  en: "Fiscal Assistant",
-  es: "Asistente Fiscal",
+  en: "Fiscal Agent",
+  es: "Agente Fiscal",
 };
 
 const LanguageContext = createContext<LanguageContextValue | null>(null);

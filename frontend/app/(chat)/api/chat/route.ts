@@ -28,7 +28,7 @@ export const maxDuration = 300;
 const inFlightExecutions = new Map<string, true>();
 
 // Structured response shape returned by the backend's POST /v1/chat/message
-// (fiscal_agent/api/routes/chat.py -> ChatResponse).
+// (agente_fiscal/api/routes/chat.py -> ChatResponse).
 interface ChatResponse {
   conversation_id: string;
   reply: string;

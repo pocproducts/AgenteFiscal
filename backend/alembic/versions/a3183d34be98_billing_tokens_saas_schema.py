@@ -24,7 +24,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-from fiscal_agent.db.uuid7 import uuid7
+from agente_fiscal.db.uuid7 import uuid7
 
 # revision identifiers, used by Alembic.
 revision: str = 'a3183d34be98'

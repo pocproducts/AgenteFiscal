@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { BackendError, callBackend } from "@/lib/backend/client";
 
 // BFF proof route for the migration: forwards the user's Clerk JWT to the
-// Python backend (fiscal_agent) and returns its UnifiedResponse unchanged.
+// Python backend (agente_fiscal) and returns its UnifiedResponse unchanged.
 export const runtime = "nodejs";
 
 interface BackendService {

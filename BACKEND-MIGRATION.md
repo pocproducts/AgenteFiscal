@@ -1,4 +1,4 @@
-# Backend Migration Plan — `fiscal_agent` (Python/FastAPI)
+# Backend Migration Plan — `agente_fiscal` (Python/FastAPI)
 
 > Status: **Draft — planning**
 > Target stack: keep **Python + FastAPI** (it works today)
@@ -8,13 +8,17 @@
 
 ## 1. Objective
 
-Migrate the existing fiscal agent backend (the archived legacy backend, package `fiscal_agent`)
+Migrate the existing fiscal agent backend (the archived legacy backend, package `agente_fiscal`)
 into the monorepo so it becomes the real backend for the Next.js frontend (`frontend/`).
 
 > Cutover Phase 5 (completed): the legacy backend folder was archived/deleted. Its
-> business data (API keys/apps/plans/developers) now lives in Postgres behind the
-> hexagonal `fiscal_agent.ports.api_keys` port; Redis remains rate-limit/cache +
-> best-effort conversations.
+> business data (API keys/apps/plans/developers/tenant admin CRUD) now lives in
+> Postgres behind hexagonal ports (`agente_fiscal.ports.api_keys`,
+> `agente_fiscal.ports.clients`); Redis remains rate-limit/cache + best-effort
+> conversations. The legacy `/v1/admin/tenants` (single "Estudio Contable" with
+> its own CUIT/clave_fiscal) was retired outright — its real equivalent, the
+> CUIT clients a tenant manages, is now `/v1/clients` over the existing
+> `clients` table (already wired to `report_runs.client_id`).
 
 The migration is **incremental (strangler fig)** — never a big-bang rewrite.
 
@@ -194,7 +198,7 @@ Recommendation: start with **RQ or a small asyncio Streams consumer**; add Celer
 - The web container never blocks on a 5-minute browser task.
 - Retries and visibility timeouts become first-class.
 - `report_runs` gives you the history/audit trail the frontend can display.
-- The existing CLI batch mode (`python -m fiscal_agent run`) maps to the same worker path.
+- The existing CLI batch mode (`python -m agente_fiscal run`) maps to the same worker path.
 
 ---
 
@@ -206,7 +210,7 @@ Order = edge first, center last. Each phase is independently shippable and rever
 - [ ] Pin Python version (3.12) and export a real `backend/pyproject.toml` (uv) from current imports.
 - [ ] Create `backend/pyproject.toml`, `backend/README.md`, `backend/.env.example`.
 - [ ] Add a Dockerfile (multi-stage) + healthcheck.
-- [x] Copy the archived legacy working tree → `backend/fiscal_agent/` as the working tree (done in Phase 0).
+- [x] Copy the archived legacy working tree → `backend/agente_fiscal/` as the working tree (done in Phase 0).
 - [ ] Run existing tests to establish a green baseline.
 
 ### Phase 1 — Data layer: Postgres (3–5 days)
@@ -237,9 +241,13 @@ Order = edge first, center last. Each phase is independently shippable and rever
 - [ ] MCP server: keep as optional process; document auth status (HTTP auth was removed — TODO).
 
 ### Phase 5 — Cutover & decommission
-- [ ] Feature-flag / canary: route a tenant to the new backend while others stay on the old path.
-- [ ] Drain Redis business-data keys; verify no production reads.
-- [ ] Remove old `api/store.py` tenant code paths.
+- [x] ~~Feature-flag / canary: route a tenant to the new backend while others stay on the old path.~~
+      N/A — a direct cutover was done instead (legacy folder deleted outright, no parallel old backend to canary against).
+- [x] Drain Redis business-data keys; verify no production reads. `tenant:apikey:*`/`tenant:app:*`/`tenant:plan:*`/`tenant:developer:*`
+      are gone from the codebase (Postgres via `ports.api_keys`); `tenant:tenant:*` (the old `TenantStore`) removed in this pass —
+      see next item. Only `tenant:{tid}:conv:*` (best-effort conversation cache) and rate-limit/JWKS keys remain in Redis, by design.
+- [x] Remove old `api/store.py` tenant code paths. `TenantStore` and `/v1/admin/tenants` deleted — no frontend consumer, no tests.
+      Replaced with `/v1/clients` (`ports/clients.py` + `adapters/db_clients.py`), Postgres-backed CRUD over the `clients` table.
 - [x] Archive/delete the legacy backend folder after a full regression pass (done in cutover Phase 5).
 
 ---
@@ -284,12 +292,12 @@ ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
-CMD ["uvicorn", "fiscal_agent.api.server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["uvicorn", "agente_fiscal.api.server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
 ```
 
 Two containers from the same image:
 - **web**: `uvicorn ...` (light endpoints only)
-- **worker**: `python -m fiscal_agent.worker` (queue consumer)
+- **worker**: `python -m agente_fiscal.worker` (queue consumer)
 
 ### Deployment checklist
 
@@ -326,7 +334,11 @@ COMPOSIO_API_KEY=...
 MEMORY_ENGRAM_URL=...
 MEMORY_REDIS_CACHE_URL=...
 
-# SMTP
+# Email (Resend — default sender for API/worker, adapters/resend_email.py)
+RESEND_API_KEY=...
+EMAIL_FROM=...
+
+# SMTP (legacy — CLI batch mode only, via clients.yaml; not read by API/worker)
 SMTP_HOST=...
 SMTP_PORT=...
 SMTP_USER=...
@@ -341,7 +353,7 @@ API_BASE_URL=https://api.example.com
 
 ## 10. Testing strategy
 
-- **Port existing tests** (the legacy `tests/` layout) into `backend/fiscal_agent/tests/` and keep them green per phase.
+- **Port existing tests** (the legacy `tests/` layout) into `backend/agente_fiscal/tests/` and keep them green per phase.
 - **Gaps to fill** (currently uncovered): `arca_ws`, `pdf_generator`, `browser/composio`, `rules_engine`, `billing`.
   - `rules_engine` and `billing` are pure — write table-driven unit tests FIRST (cheap, high value).
   - `arca_ws` and `browser` → integration tests behind env flags, never in CI defaults.

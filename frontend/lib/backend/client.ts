@@ -25,7 +25,7 @@ export class BackendError extends Error {
 
 interface BackendErrorEnvelope {
   status?: string;
-  error?: { code?: string; message?: string; detail?: string };
+  error?: { code?: string; message?: string; detail?: string; cause?: string };
 }
 
 async function toBackendError(res: Response): Promise<BackendError> {
@@ -35,7 +35,7 @@ async function toBackendError(res: Response): Promise<BackendError> {
     const body = (await res.json()) as BackendErrorEnvelope;
     if (body?.status === "error" && body?.error) {
       code = body.error.code;
-      detail = body.error.message ?? body.error.detail;
+      detail = body.error.message ?? body.error.detail ?? body.error.cause;
     }
   } catch {
     // Non-JSON body: fall back to res.statusText.

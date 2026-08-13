@@ -2,7 +2,7 @@
 
 Migrations run against the UNPOOLED URL (``DATABASE_URL_UNPOOLED``) because
 transaction poolers break the prepared-statement protocol. The application
-engine uses the pooled URL (see ``fiscal_agent/db/session.py``).
+engine uses the pooled URL (see ``agente_fiscal/db/session.py``).
 """
 
 from __future__ import annotations
@@ -15,11 +15,11 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from fiscal_agent.config import get_settings
-from fiscal_agent.db.base import Base
-from fiscal_agent.db.session import async_url
+from agente_fiscal.config import get_settings
+from agente_fiscal.db.base import Base
+from agente_fiscal.db.session import async_url
 
-import fiscal_agent.db.models  # noqa: F401  (register models on metadata)
+import agente_fiscal.db.models  # noqa: F401  (register models on metadata)
 
 config = context.config
 
