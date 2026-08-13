@@ -15,11 +15,13 @@ Mapping decisions (documented, essential scope):
     ``'owner'``/``'admin'``) on the seed tenant (``Estudio Contable``). The
     ORM has no ``Developer`` entity; ``Apps.developer_id`` already points at
     ``users.id``.
-  - ORM ``ApiKey`` has no ``app_id``/``scopes``/``key_preview`` columns (the
-    schema predates the Redis domains). ``key_preview`` (last 4 plaintext
-    chars) is carried inside ``ApiKey.name`` at creation; scopes come from the
-    tenant's resolved plan (``db.auth.get_active_plan`` → ``features``), same
-    rule the Clerk path already uses.
+  - ORM ``ApiKey`` has no ``app_id``/``key_preview`` columns (the schema
+    predates the Redis domains). ``key_preview`` (last 4 plaintext chars) is
+    carried inside ``ApiKey.name`` at creation. ``scopes`` and ``expires_at``
+    ARE real columns (migration ``0002``): scopes are persisted on create and
+    fall back to the tenant's resolved plan (``db.auth.get_active_plan`` →
+    ``features``) for legacy rows; ``resolve`` treats a key whose
+    ``expires_at`` is in the past as invalid, same as ``is_active=False``.
   - ORM ``App`` has no ``environment``/``status`` columns. ``environment`` is
     honored on create (request-only, not persisted); resolution defaults
     ``environment='production'``, ``status='active'``. A suspended-app concept
@@ -34,7 +36,7 @@ import secrets
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -57,6 +59,11 @@ _DEFAULT_TENANT_NAME = 'Estudio Contable'
 
 #: Fallback scopes for a fresh key when the tenant has no resolvable plan.
 _DEFAULT_SCOPES: list[str] = ['chat:read', 'chat:write']
+
+#: Sentinel distinguishing "field not sent" from an explicit ``None`` on
+#: partial updates where ``None`` is a meaningful value (e.g. clearing
+#: ``expires_at``).
+_UNSET = object()
 
 
 def hash_api_key(raw_key: str) -> str:
@@ -91,6 +98,18 @@ def _preview_from_name(name: str) -> str:
 	return ''
 
 
+def _display_name(name: str) -> str:
+	"""Strip the trailing ``' (abcd)'`` preview suffix from a stored key name.
+
+	``ApiKey.name`` doubles as the only storage for the preview (schema gap);
+	the user-facing part is everything before the validated suffix.
+	"""
+	preview = _preview_from_name(name)
+	if preview:
+		return name[: -len(f' ({preview})')]
+	return name
+
+
 def _to_developer(user: UserRow) -> Developer:
 	"""Map a ``User`` row to the pydantic Developer state/response contract."""
 	return Developer(
@@ -117,18 +136,27 @@ def _to_api_key(
 	row: ApiKeyRow,
 	*,
 	app_id: str,
-	scopes: list[str],
 	preview: str | None = None,
+	scopes: list[str] | None = None,
 ) -> ApiKey:
-	"""Map an ORM ``ApiKey`` row to the pydantic ApiKey state contract."""
+	"""Map an ORM ``ApiKey`` row to the pydantic ApiKey state contract.
+
+	``scopes`` prefers the explicitly passed value (plan-derived during
+	resolution/creation); otherwise falls back to the persisted ``row.scopes``
+	column and finally the default scopes (legacy rows pre-``0002``).
+	"""
+	if scopes is None:
+		scopes = row.scopes if row.scopes is not None else list(_DEFAULT_SCOPES)
 	return ApiKey(
 		id=str(row.id),
 		app_id=app_id,
 		key_preview=preview if preview is not None else _preview_from_name(row.name),
+		name=_display_name(row.name) or None,
 		is_active=bool(row.is_active),
 		scopes=list(scopes),
 		tenant_id=str(row.tenant_id),
 		created_at=row.created_at,
+		expires_at=row.expires_at,
 	)
 
 
@@ -146,7 +174,11 @@ class PostgresApiKeyPort:
 	# ── ApiKeyPort: auth resolution ───────────────────────────────────
 
 	async def resolve(self, key_hash: str) -> ApiKeyContext | None:
-		"""Resolve a hashed key to its full auth context (see port docstring)."""
+		"""Resolve a hashed key to its full auth context (see port docstring).
+
+		An expired key (``expires_at`` in the past) resolves to ``None``, same
+		as an inactive/revoked one.
+		"""
 		async with self._session_factory() as session:
 			try:
 				row = await session.scalar(
@@ -154,13 +186,19 @@ class PostgresApiKeyPort:
 						ApiKeyRow.key_hash == key_hash,
 						ApiKeyRow.is_active.is_(True),
 						ApiKeyRow.revoked_at.is_(None),
+						(ApiKeyRow.expires_at.is_(None) | (ApiKeyRow.expires_at > func.now())),
 					)
 				)
 				if row is None:
 					return None
 
 				plan = await get_active_plan(session, row.tenant_id)
-				scopes = plan.scopes if plan else list(_DEFAULT_SCOPES)
+				# Persisted key scopes win; legacy rows fall back to the plan.
+				scopes = (
+					list(row.scopes)
+					if row.scopes is not None
+					else (plan.scopes if plan else list(_DEFAULT_SCOPES))
+				)
 
 				# App (informational state; mirrors the old request.state.app
 				# contract) — first app of the tenant.
@@ -276,6 +314,7 @@ class PostgresApiKeyPort:
 		*,
 		tenant_id: str | None = None,
 		scopes: list[str] | None = None,
+		expires_at: datetime | None = None,
 	) -> dict | None:
 		"""Create an API key. Returns ``{'api_key', 'full_key'}`` or ``None``.
 
@@ -283,6 +322,8 @@ class PostgresApiKeyPort:
 		  1. ``app_id`` (a real UUID) → its owning tenant;
 		  2. else ``tenant_id`` (Clerk flow, apps no longer required);
 		  3. else ``None`` (the caller reports 404, matching the old contract).
+
+		Resolved ``scopes`` and ``expires_at`` are persisted on the key row.
 		"""
 		async with self._session_factory() as session:
 			try:
@@ -318,6 +359,8 @@ class PostgresApiKeyPort:
 					key_hash=hash_api_key(full_key),
 					name=f'{label} ({preview})',
 					is_active=True,
+					scopes=key_scopes,
+					expires_at=expires_at,
 				)
 				session.add(row)
 				await session.flush()
@@ -371,6 +414,107 @@ class PostgresApiKeyPort:
 			await session.commit()
 			return True
 
+	async def update_key(
+		self,
+		key_id: str,
+		tenant_id: str,
+		*,
+		name: str | None = None,
+		scopes: list[str] | None = None,
+		is_active: bool | None = None,
+		expires_at: datetime | None | object = _UNSET,
+	) -> ApiKey | None:
+		"""Partial-update a key, verifying tenant ownership.
+
+		``None`` for ``name``/``scopes``/``is_active`` means "leave unchanged".
+		``expires_at`` uses a sentinel default so an explicit ``None`` clears
+		the expiry. Setting ``is_active=True`` reactivates a deactivated key.
+		Returns ``None`` when the key is missing or foreign to the tenant.
+		"""
+		kid = _as_uuid(key_id)
+		tid = _as_uuid(tenant_id)
+		if kid is None or tid is None:
+			return None
+		async with self._session_factory() as session:
+			row = await session.get(ApiKeyRow, kid)
+			if row is None or row.tenant_id != tid:
+				return None
+			if name is not None:
+				existing_preview = _preview_from_name(row.name)
+				# The preview lives inside ``name`` (schema gap); preserve it
+				# across a rename so GET/list never lose the preview.
+				row.name = f'{name} ({existing_preview})' if existing_preview else name
+			if scopes is not None:
+				row.scopes = list(scopes)
+			if is_active is not None:
+				row.is_active = bool(is_active)
+			if expires_at is not _UNSET:
+				row.expires_at = expires_at if isinstance(expires_at, datetime) else None
+			await session.commit()
+			await session.refresh(row)
+			app_row = await session.scalar(
+				select(AppRow).where(AppRow.tenant_id == tid).limit(1)
+			)
+			app_id = str(app_row.id) if app_row is not None else ''
+			return _to_api_key(row, app_id=app_id)
+
+	async def get_key(self, key_id: str, tenant_id: str) -> ApiKey | None:
+		"""Fetch a single key by id, scoped to *tenant_id* (never the secret)."""
+		kid = _as_uuid(key_id)
+		tid = _as_uuid(tenant_id)
+		if kid is None or tid is None:
+			return None
+		async with self._session_factory() as session:
+			row = await session.get(ApiKeyRow, kid)
+			if row is None or row.tenant_id != tid:
+				return None
+			app_row = await session.scalar(
+				select(AppRow).where(AppRow.tenant_id == tid).limit(1)
+			)
+			app_id = str(app_row.id) if app_row is not None else ''
+			return _to_api_key(row, app_id=app_id)
+
+	async def list_keys(
+		self, tenant_id: str, *, limit: int = 50, offset: int = 0
+	) -> list[ApiKey]:
+		"""List keys of a tenant, newest first, paginated."""
+		tid = _as_uuid(tenant_id)
+		if tid is None:
+			return []
+		async with self._session_factory() as session:
+			return await self._list_keys_for_tenant(session, tid, limit=limit, offset=offset)
+
+	async def count_keys(self, tenant_id: str) -> int:
+		"""Count keys of a tenant (for ``X-Total-Count``)."""
+		tid = _as_uuid(tenant_id)
+		if tid is None:
+			return 0
+		async with self._session_factory() as session:
+			return int(
+				(
+					await session.execute(
+						select(func.count()).select_from(ApiKeyRow).where(
+							ApiKeyRow.tenant_id == tid
+						)
+					)
+				).scalar_one()
+			)
+
+	async def list_apps(self, developer_id: str) -> list[App]:
+		"""List apps owned by the developer, newest first (developer-scoped)."""
+		dev_uuid = _as_uuid(developer_id)
+		if dev_uuid is None:
+			return []
+		async with self._session_factory() as session:
+			rows = (
+				await session.execute(
+					select(AppRow)
+					.where(AppRow.developer_id == dev_uuid)
+					.order_by(AppRow.created_at.desc())
+				)
+			).scalars().all()
+			return [_to_app(r) for r in rows]
+
 	# ── Private helpers ──────────────────────────────────────────────
 
 	async def _get_or_create_seed_tenant(self, session: AsyncSession) -> TenantRow:
@@ -412,22 +556,28 @@ class PostgresApiKeyPort:
 		user = await session.get(UserRow, member.user_id)
 		return _to_developer(user) if user is not None else None
 
-	async def _list_keys_for_tenant(self, session: AsyncSession, tenant_id: UUID) -> list[ApiKey]:
-		"""All keys of a tenant, newest first, with plan-derived scopes."""
-		plan = await get_active_plan(session, tenant_id)
-		scopes = plan.scopes if plan is not None else list(_DEFAULT_SCOPES)
-		rows = (
-			await session.execute(
-				select(ApiKeyRow)
-				.where(ApiKeyRow.tenant_id == tenant_id)
-				.order_by(ApiKeyRow.created_at.desc())
-			)
-		).scalars().all()
+	async def _list_keys_for_tenant(
+		self,
+		session: AsyncSession,
+		tenant_id: UUID,
+		*,
+		limit: int | None = None,
+		offset: int = 0,
+	) -> list[ApiKey]:
+		"""All keys of a tenant, newest first, with per-key persisted scopes."""
+		stmt = (
+			select(ApiKeyRow)
+			.where(ApiKeyRow.tenant_id == tenant_id)
+			.order_by(ApiKeyRow.created_at.desc())
+		)
+		if limit is not None:
+			stmt = stmt.limit(limit).offset(offset)
+		rows = (await session.execute(stmt)).scalars().all()
 		app_row = await session.scalar(
 			select(AppRow).where(AppRow.tenant_id == tenant_id).limit(1)
 		)
 		app_id = str(app_row.id) if app_row is not None else ''
-		return [_to_api_key(r, app_id=app_id, scopes=scopes) for r in rows]
+		return [_to_api_key(r, app_id=app_id) for r in rows]
 
 
 __all__ = [

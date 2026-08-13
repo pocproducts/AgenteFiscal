@@ -14,10 +14,11 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
+    TEXT,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from agente_fiscal.db.base import Base, TimestampMixin, UuidPkMixin
@@ -104,6 +105,8 @@ class ApiKey(UuidPkMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default='true')
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scopes: Mapped[list[str] | None] = mapped_column(ARRAY(TEXT), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tenant: Mapped[Tenant] = relationship(back_populates='api_keys')
 

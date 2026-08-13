@@ -621,6 +621,7 @@ class ApiKey(BaseModel):
 	id: str
 	app_id: str
 	key_preview: str
+	name: str | None = None
 	is_active: bool = True
 	scopes: list[str] = []
 	tenant_id: str | None = None

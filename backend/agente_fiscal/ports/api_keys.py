@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from agente_fiscal.domain.models import ApiKey, App, Developer, Plan
@@ -109,13 +110,15 @@ class ApiKeyRepository(Protocol):
 		*,
 		tenant_id: str | None = None,
 		scopes: list[str] | None = None,
+		expires_at: datetime | None = None,
 	) -> dict | None:
 		"""Create an API key. Returns ``{'api_key': ..., 'full_key': ...}`` or ``None``.
 
 		``app_id`` resolves the owning tenant when ``tenant_id`` is omitted
 		(register / dev-key flows). Clerk flow passes ``tenant_id`` directly.
-		The plaintext ``full_key`` is returned exactly once; only its sha256
-		hash is stored.
+		``scopes`` (validated against the plan by the route) and ``expires_at``
+		are persisted on the key. The plaintext ``full_key`` is returned exactly
+		once; only its sha256 hash is stored.
 		"""
 		...
 
@@ -129,6 +132,47 @@ class ApiKeyRepository(Protocol):
 
 	async def deactivate_key(self, key_id: str, tenant_id: str) -> bool:
 		"""Set ``is_active=False`` for a key, verifying tenant ownership."""
+		...
+
+	async def update_key(
+		self,
+		key_id: str,
+		tenant_id: str,
+		*,
+		name: str | None = None,
+		scopes: list[str] | None = None,
+		is_active: bool | None = None,
+		expires_at: datetime | None = None,
+	) -> ApiKey | None:
+		"""Partial-update a key (name/scopes/is_active/expires_at), tenant-ownership-checked.
+
+		``None`` means "leave unchanged" for ``name``/``scopes``/``is_active``;
+		``expires_at`` accepts an explicit ``None`` to clear the expiry. Real
+		reactivation is supported via ``is_active=True``. Returns ``None`` when
+		the key is missing or belongs to another tenant.
+		"""
+		...
+
+	async def get_key(self, key_id: str, tenant_id: str) -> ApiKey | None:
+		"""Fetch a single key by id, scoped to *tenant_id*.
+
+		Never returns the raw secret — the domain :class:`ApiKey` only carries
+		``key_preview``. ``None`` if missing or foreign to the tenant.
+		"""
+		...
+
+	async def list_keys(
+		self, tenant_id: str, *, limit: int = 50, offset: int = 0
+	) -> list[ApiKey]:
+		"""List keys of a tenant, newest first, with pagination."""
+		...
+
+	async def count_keys(self, tenant_id: str) -> int:
+		"""Count keys of a tenant (for ``X-Total-Count``)."""
+		...
+
+	async def list_apps(self, developer_id: str) -> list[App]:
+		"""List apps owned by the developer (developer-scoped, not tenant)."""
 		...
 
 
