@@ -4,14 +4,29 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from agente_fiscal.api.deps import REPRESENTANTE_CUIT, get_memory
 from agente_fiscal.config import get_settings
 from agente_fiscal.domain.models import ApiError, DeudaOutput, UnifiedResponse
+from agente_fiscal.features import integration_enabled
 
 router = APIRouter()
+
+
+def _browser_disabled_error() -> HTTPException:
+	"""Clean 503 when the browser integration is disabled (kill-switch)."""
+	return HTTPException(
+		status_code=503,
+		detail=UnifiedResponse(
+			status='error',
+			error=ApiError(
+				code='INTEGRATION_DISABLED',
+				cause='La integración de browser (Composio) está deshabilitada. Activá BROWSER_ENABLED=true para habilitarla',
+			),
+		).model_dump(),
+	)
 
 
 class ExtractRequest(BaseModel):
@@ -43,6 +58,9 @@ async def extract(
 	"""Extrae datos del contribuyente usando navegador automatizado (Composio).
 	Soporta: deuda (ctacte.cloud), facilidades (Mis Facilidades) y registro (RUT).
 	"""
+	if not integration_enabled('browser'):
+		raise _browser_disabled_error()
+
 	cuit = request.cuit
 	creds = get_settings().credentials
 	composio_key = creds.composio_api_key

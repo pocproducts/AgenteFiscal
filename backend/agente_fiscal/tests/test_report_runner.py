@@ -40,6 +40,16 @@ def _make_runner(test_session_factory) -> ReportRunner:
     )
 
 
+def _settings(arca: bool = True, browser: bool = False) -> SimpleNamespace:
+    """Settings stand-in exposing the feature-flag attributes."""
+    return SimpleNamespace(
+        arca_enabled=arca,
+        browser_enabled=browser,
+        pdf_enabled=True,
+        credentials=SimpleNamespace(composio_api_key='', clave_fiscal=''),
+    )
+
+
 def _pipeline_fake(result: PipelineResult | None = None, exc: Exception | None = None):
     """A stand-in for PipelineService whose run_pipeline is deterministic."""
 
@@ -95,6 +105,7 @@ async def _get_run(test_session_factory, run_id):
 
 
 async def test_process_run_happy_path(test_session_factory, make_tenant, monkeypatch) -> None:
+    monkeypatch.setattr(runner_mod, 'get_settings', lambda: _settings(arca=True))
     monkeypatch.setattr(runner_mod, 'get_ta', lambda *a, **k: ('tok', 'sign'))
     monkeypatch.setattr(
         runner_mod, 'PipelineService', _pipeline_fake(result=PipelineResult(cliente='Acme', cuit=CUIT))
@@ -123,6 +134,7 @@ async def test_process_run_pipeline_error_flags_failed(
     test_session_factory, make_tenant, monkeypatch
 ) -> None:
     result = PipelineResult(cliente='Acme', cuit=CUIT, error='extraction broke')
+    monkeypatch.setattr(runner_mod, 'get_settings', lambda: _settings(arca=True))
     monkeypatch.setattr(runner_mod, 'get_ta', lambda *a, **k: ('tok', 'sign'))
     monkeypatch.setattr(runner_mod, 'PipelineService', _pipeline_fake(result=result))
 
@@ -140,6 +152,7 @@ async def test_process_run_pipeline_error_flags_failed(
 async def test_process_run_pipeline_raises_runs_failed(
     test_session_factory, make_tenant, monkeypatch
 ) -> None:
+    monkeypatch.setattr(runner_mod, 'get_settings', lambda: _settings(arca=True))
     monkeypatch.setattr(runner_mod, 'get_ta', lambda *a, **k: ('tok', 'sign'))
     monkeypatch.setattr(
         runner_mod, 'PipelineService', _pipeline_fake(exc=RuntimeError('kaboom'))
@@ -159,6 +172,7 @@ async def test_process_run_pipeline_raises_runs_failed(
 async def test_process_run_ta_unavailable(
     test_session_factory, make_tenant, monkeypatch
 ) -> None:
+    monkeypatch.setattr(runner_mod, 'get_settings', lambda: _settings(arca=True))
     monkeypatch.setattr(runner_mod, 'get_ta', lambda *a, **k: (None, None))
     async with test_session_factory() as session:
         tenant = await make_tenant(session)
@@ -170,6 +184,24 @@ async def test_process_run_ta_unavailable(
     assert persisted.status == 'failed'
     assert persisted.error['code'] == 'TA_UNAVAILABLE'
     assert 'remediation' in persisted.error
+
+
+async def test_process_run_arca_disabled_marks_failed(
+    test_session_factory, make_tenant, monkeypatch
+) -> None:
+    """A disabled ARCA integration fails the run with INTEGRATION_DISABLED."""
+    monkeypatch.setattr(runner_mod, 'get_settings', lambda: _settings(arca=False))
+    monkeypatch.setattr(runner_mod, 'get_ta', lambda *a, **k: ('tok', 'sign'))
+    async with test_session_factory() as session:
+        tenant = await make_tenant(session)
+    run = await _insert_run(test_session_factory, tenant.id, steps=dict(_STEPS))
+
+    await _make_runner(test_session_factory).process_run(run.id)
+
+    persisted = await _get_run(test_session_factory, run.id)
+    assert persisted.status == 'failed'
+    assert persisted.error['code'] == 'INTEGRATION_DISABLED'
+    assert 'arca' in persisted.error['cause'].lower()
 
 
 async def test_process_run_missing_period_fails(
@@ -249,7 +281,8 @@ async def test_build_browser_missing_creds_raises(monkeypatch) -> None:
         runner_mod,
         'get_settings',
         lambda: SimpleNamespace(
-            credentials=SimpleNamespace(composio_api_key='', clave_fiscal='')
+            browser_enabled=True,
+            credentials=SimpleNamespace(composio_api_key='', clave_fiscal=''),
         ),
     )
     runner = _make_runner(None)
@@ -262,7 +295,8 @@ async def test_build_browser_partial_creds_raises(monkeypatch) -> None:
         runner_mod,
         'get_settings',
         lambda: SimpleNamespace(
-            credentials=SimpleNamespace(composio_api_key='key', clave_fiscal='')
+            browser_enabled=True,
+            credentials=SimpleNamespace(composio_api_key='key', clave_fiscal=''),
         ),
     )
     runner = _make_runner(None)
@@ -277,7 +311,8 @@ async def test_build_browser_with_creds(monkeypatch) -> None:
         runner_mod,
         'get_settings',
         lambda: SimpleNamespace(
-            credentials=SimpleNamespace(composio_api_key='composio-key', clave_fiscal='clave')
+            browser_enabled=True,
+            credentials=SimpleNamespace(composio_api_key='composio-key', clave_fiscal='clave'),
         ),
     )
     browser = _make_runner(None)._build_browser(needed=True)
@@ -285,6 +320,22 @@ async def test_build_browser_with_creds(monkeypatch) -> None:
     assert browser._api_key == 'composio-key'
     assert browser._estudio_cuit == REPRESENTANTE_CUIT
     assert browser._estudio_clave == 'clave'
+
+
+async def test_build_browser_disabled_raises(monkeypatch) -> None:
+    """A disabled browser integration fails cleanly before touching creds."""
+    monkeypatch.setattr(
+        runner_mod,
+        'get_settings',
+        lambda: SimpleNamespace(
+            browser_enabled=False,
+            credentials=SimpleNamespace(composio_api_key='composio-key', clave_fiscal='clave'),
+        ),
+    )
+    runner = _make_runner(None)
+    with pytest.raises(runner_mod.IntegrationDisabledError) as exc_info:
+        runner._build_browser(needed=True)
+    assert exc_info.value.integration == 'browser'
 
 
 # ─── _fetch_next_queued ─────────────────────────────────────────────────────
@@ -327,6 +378,7 @@ async def test_fetch_next_queued_none_when_empty(test_session_factory) -> None:
 async def test_run_loop_processes_run_then_stops(
     test_session_factory, make_tenant, monkeypatch
 ) -> None:
+    monkeypatch.setattr(runner_mod, 'get_settings', lambda: _settings(arca=True))
     monkeypatch.setattr(runner_mod, 'get_ta', lambda *a, **k: ('tok', 'sign'))
     monkeypatch.setattr(
         runner_mod, 'PipelineService', _pipeline_fake(result=PipelineResult(cliente='A', cuit=CUIT))

@@ -44,6 +44,7 @@ from agente_fiscal.api.store import RedisStore
 from agente_fiscal.config import get_settings
 from agente_fiscal.db.session import async_session_factory, engine
 from agente_fiscal.domain.models import ApiError, UnifiedResponse
+from agente_fiscal.features import IntegrationDisabledError
 from agente_fiscal.telemetry import init_telemetry
 from agente_fiscal.worker.runner import start_worker
 
@@ -180,6 +181,28 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 		else UnifiedResponse(
 			status='error',
 			error={'code': 'HTTP_ERROR', 'cause': str(exc.detail)},
+		).model_dump(),
+	)
+
+
+# Feature-flag errors: an integration disabled by config surfaces as a clean
+# 503 rather than a 500, regardless of which layer raised it.
+_DISABLED_INTEGRATIONS = {'arca': 'ARCA', 'browser': 'Composio', 'pdf': 'PDF'}
+
+
+@app.exception_handler(IntegrationDisabledError)
+async def integration_disabled_handler(request: Request, exc: IntegrationDisabledError) -> JSONResponse:
+	"""Convert a disabled-integration error into HTTP 503 INTEGRATION_DISABLED."""
+	name = _DISABLED_INTEGRATIONS.get(exc.integration, exc.integration)
+	return JSONResponse(
+		status_code=503,
+		content=UnifiedResponse(
+			status='error',
+			error=ApiError(
+				code='INTEGRATION_DISABLED',
+				cause=str(exc),
+				remediation=f'Habilitar la integración {name} vía su flag de configuración para poder usarla',
+			),
 		).model_dump(),
 	)
 

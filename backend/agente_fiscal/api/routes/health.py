@@ -17,6 +17,7 @@ from agente_fiscal.api.deps import get_ta
 from agente_fiscal.config import get_settings
 from agente_fiscal.adapters.memory.config import MemoryConfig
 from agente_fiscal.domain.models import ApiError, ServiceStatus, SystemHealth, UnifiedResponse
+from agente_fiscal.features import integration_enabled
 
 router = APIRouter()
 
@@ -88,6 +89,17 @@ async def _check_ta() -> ServiceStatus:
 	from agente_fiscal.api.deps import CERT_PATH, KEY_PATH
 
 	start = time.monotonic()
+
+	# Disabled integration → report as skipped/disabled, not as an error.
+	if not integration_enabled('arca'):
+		return ServiceStatus(
+			name='ta',
+			status='healthy',
+			last_check=datetime.now(timezone.utc),
+			version='disabled',
+			error='Integración ARCA deshabilitada (ARCA_ENABLED=false)',
+		)
+
 	certs_ok = CERT_PATH.exists() and KEY_PATH.exists()
 	if not certs_ok:
 		latency = (time.monotonic() - start) * 1000
@@ -120,6 +132,17 @@ async def _check_ta() -> ServiceStatus:
 async def _check_composio() -> ServiceStatus:
 	"""Checkear Composio: API key presente en settings."""
 	start = time.monotonic()
+
+	# Disabled integration → report as skipped/disabled, not as an error.
+	if not integration_enabled('browser'):
+		return ServiceStatus(
+			name='composio',
+			status='healthy',
+			last_check=datetime.now(timezone.utc),
+			version='disabled',
+			error='Integración de browser (Composio) deshabilitada (BROWSER_ENABLED=false)',
+		)
+
 	settings = get_settings()
 	api_key = settings.credentials.composio_api_key
 	latency = (time.monotonic() - start) * 1000

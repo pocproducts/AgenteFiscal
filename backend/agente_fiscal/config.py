@@ -126,6 +126,27 @@ class AppSettings(BaseSettings):
 		description='If False, fully disables Engram/Redis memory (no-op memory client)',
 	)
 
+	# ── Feature flags (integrations) ────────────────────────────────────
+	# External integrations (ARCA SOAP, Composio browser) default OFF and must
+	# be enabled explicitly via env for production smoke runs. A disabled
+	# integration returns a clean 503 INTEGRATION_DISABLED instead of crashing
+	# or touching the network. PDF generation is purely local, so it stays ON.
+	arca_enabled: bool = Field(
+		default=False,
+		alias='ARCA_ENABLED',
+		description='If False, ARCA (WSAA + Padrón A5) is disabled — no WSAA network calls',
+	)
+	browser_enabled: bool = Field(
+		default=False,
+		alias='BROWSER_ENABLED',
+		description='If False, Composio browser is disabled — no Composio cloud calls',
+	)
+	pdf_enabled: bool = Field(
+		default=True,
+		alias='PDF_ENABLED',
+		description='If False, PDF generation is disabled (local-only; on by default)',
+	)
+
 	@property
 	def credentials(self) -> Credentials:
 		"""Recreate ``Credentials`` from flattened fields.

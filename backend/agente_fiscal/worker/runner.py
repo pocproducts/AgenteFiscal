@@ -32,6 +32,7 @@ from agente_fiscal.adapters.browser import ComposioBrowser
 from agente_fiscal.config import REPRESENTANTE_CUIT, get_settings
 from agente_fiscal.db.models import Client, ReportRun
 from agente_fiscal.domain.models import ClientConfig
+from agente_fiscal.features import IntegrationDisabledError, integration_enabled
 from agente_fiscal.pipeline.service import PipelineService
 from agente_fiscal.telemetry import init_telemetry
 
@@ -98,6 +99,10 @@ class ReportRunner:
 				if not mes or not anio:
 					raise ValueError('missing period in report_runs.steps (mes/anio)')
 
+				# ── ARCA feature gate (kill-switch, no network when disabled) ──
+				if not integration_enabled('arca', get_settings()):
+					raise IntegrationDisabledError('arca')
+
 				# ── TA (shared cache: CLI, API, MCP) ───────────────────────
 				token, sign = get_ta()
 				if not token or not sign:
@@ -146,6 +151,15 @@ class ReportRunner:
 					'cause': 'No se pudo obtener Ticket de Acceso de ARCA',
 					'remediation': 'Verificar certificados en .certificados-arca/',
 				}
+			except IntegrationDisabledError as exc:
+				steps['progress'] = progress_msgs
+				run.steps = steps
+				run.status = 'failed'
+				run.error = {
+					'code': 'INTEGRATION_DISABLED',
+					'cause': str(exc),
+					'remediation': 'Habilitar la integración vía su flag de configuración (ARCA_ENABLED / BROWSER_ENABLED / PDF_ENABLED)',
+				}
 			except Exception as exc:
 				logger.exception('ReportRun %s failed', report_run_id)
 				steps['progress'] = progress_msgs
@@ -171,9 +185,15 @@ class ReportRunner:
 		return ClientConfig(cuit=run.cuit, nombre=client_row.name, email=client_row.email or '')
 
 	def _build_browser(self, needed: bool) -> Optional[ComposioBrowser]:
-		"""Lazily build the Composio browser only when a flag requires it."""
+		"""Lazily build the Composio browser only when a flag requires it.
+
+		Raises ``IntegrationDisabledError`` before any Composio cloud call when
+		the browser integration is disabled (``BROWSER_ENABLED=false``).
+		"""
 		if not needed:
 			return None
+		if not integration_enabled('browser', get_settings()):
+			raise IntegrationDisabledError('browser')
 		creds = get_settings().credentials
 		composio_key = creds.composio_api_key
 		estudio_clave = creds.clave_fiscal

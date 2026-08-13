@@ -167,6 +167,16 @@ async def report(
 	browser = None
 	usa_browser = request.with_deuda or request.with_facilidades or request.with_registro
 	if usa_browser:
+		from agente_fiscal.features import integration_enabled
+
+		if not integration_enabled('browser'):
+			return UnifiedResponse(
+				status='error',
+				error=ApiError(
+					code='INTEGRATION_DISABLED',
+					cause='La integración de browser (Composio) está deshabilitada. Activá BROWSER_ENABLED=true para habilitarla',
+				),
+			)
 		creds = get_settings().credentials
 		composio_key = creds.composio_api_key
 		estudio_clave = creds.clave_fiscal

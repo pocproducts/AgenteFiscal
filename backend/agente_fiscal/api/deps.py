@@ -14,11 +14,12 @@ from typing import Optional
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agente_fiscal.adapters.arca_ws import get_ta
+from agente_fiscal.adapters.arca_ws import get_ta as _get_ta_arca
 from agente_fiscal.config import CERT_DIR, CERT_PATH, KEY_PATH, REPRESENTANTE_CUIT, get_settings
 from agente_fiscal.adapters.memory import FiscalMemoryClient
 from agente_fiscal.adapters.pdf_generator import PdfGenerator
 from agente_fiscal.domain.rules_engine import RulesEngine
+from agente_fiscal.features import IntegrationDisabledError, arca_enabled, pdf_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +42,34 @@ def get_engine() -> RulesEngine:
 	return _engine
 
 
-def get_pdf_gen() -> PdfGenerator:
-	"""Return cached PdfGenerator instance."""
+class _DisabledPdfGenerator:
+	"""Guarded PDF generator: raises ``IntegrationDisabledError`` when used.
+
+	Returned by ``get_pdf_gen()`` while ``PDF_ENABLED=false`` so the worker and
+	routes keep working; the failure surfaces only when an actual PDF is
+	requested, as a clean ``INTEGRATION_DISABLED`` error instead of a crash.
+	"""
+
+	def __init__(self, integration: str = 'pdf') -> None:
+		self._integration = integration
+
+	def __getattr__(self, _name: str):
+		def _raise(*_args, **_kwargs):
+			raise IntegrationDisabledError(self._integration)
+
+		return _raise
+
+
+def get_pdf_gen() -> PdfGenerator | _DisabledPdfGenerator:
+	"""Return cached PdfGenerator instance.
+
+	While ``PDF_ENABLED=false`` returns a guarded stub that raises
+	``IntegrationDisabledError`` on first use (the pipeline catches it and
+	reports a clean ``INTEGRATION_DISABLED`` error).
+	"""
 	global _pdf_gen
 	if _pdf_gen is None:
-		_pdf_gen = PdfGenerator()
+		_pdf_gen = PdfGenerator() if pdf_enabled() else _DisabledPdfGenerator()
 	return _pdf_gen
 
 
@@ -71,4 +95,17 @@ async def get_db_session(request: Request) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-# get_ta imported from agente_fiscal.adapters.arca_ws — shared cache for CLI, API, MCP
+# get_ta wrapped from agente_fiscal.adapters.arca_ws — shared cache for CLI,
+# API and MCP. Gated so a disabled ARCA integration never touches the network.
+
+
+def get_ta(service: str = 'ws_sr_constancia_inscripcion') -> tuple[Optional[str], Optional[str]]:
+	"""Return the cached Ticket de Acceso, or ``(None, None)`` when ARCA is disabled.
+
+	While ``ARCA_ENABLED=false`` the underlying WSAA network calls are never
+	performed — callers see ``(None, None)`` (same as a missing TA) and map it
+	to their existing TA_UNAVAILABLE / error flow.
+	"""
+	if not arca_enabled():
+		return None, None
+	return _get_ta_arca(service)

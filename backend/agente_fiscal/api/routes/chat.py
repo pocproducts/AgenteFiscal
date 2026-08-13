@@ -207,6 +207,10 @@ def _handle_reporte(cuit: str) -> dict[str, Any] | None:
 
 	if with_browser:
 		from agente_fiscal.adapters.browser import ComposioBrowser
+		from agente_fiscal.features import IntegrationDisabledError, integration_enabled
+
+		if not integration_enabled('browser'):
+			raise IntegrationDisabledError('browser')
 
 		browser = ComposioBrowser(
 			composio_api_key=creds.composio_api_key,
@@ -281,6 +285,10 @@ def _handle_reporte_with_echo(
 
 	if with_browser:
 		from agente_fiscal.adapters.browser import ComposioBrowser
+		from agente_fiscal.features import IntegrationDisabledError, integration_enabled
+
+		if not integration_enabled('browser'):
+			raise IntegrationDisabledError('browser')
 
 		browser = ComposioBrowser(
 			composio_api_key=creds.composio_api_key,
@@ -360,6 +368,10 @@ def _handle_wizard_pipeline(
 			echo_func('  ⚠️  Credenciales de browser no configuradas — algunas tareas no estarán disponibles')
 		else:
 			from agente_fiscal.adapters.browser import ComposioBrowser
+			from agente_fiscal.features import IntegrationDisabledError, integration_enabled
+
+			if not integration_enabled('browser'):
+				raise IntegrationDisabledError('browser')
 
 			browser = ComposioBrowser(
 				composio_api_key=creds.composio_api_key,

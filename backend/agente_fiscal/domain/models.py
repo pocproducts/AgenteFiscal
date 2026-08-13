@@ -684,6 +684,16 @@ class SystemHealth(BaseModel):
 	timestamp: datetime = Field(description='Momento del chequeo')
 
 
+class SystemFeatures(BaseModel):
+	"""Feature flags efectivos de las integraciones del sistema."""
+
+	model_config = ConfigDict(extra='forbid')
+
+	arca_enabled: bool = Field(description='Integración ARCA (WSAA + Padrón A5) habilitada')
+	browser_enabled: bool = Field(description='Integración de browser (Composio) habilitada')
+	pdf_enabled: bool = Field(description='Generación de PDF habilitada')
+
+
 class SystemMetrics(BaseModel):
 	"""Métricas agregadas del sistema a partir de observaciones en Engram."""
 

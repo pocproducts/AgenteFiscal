@@ -28,10 +28,12 @@ from agente_fiscal.domain.models import (
 	ApiError,
 	ErrorEvent,
 	ServiceStatus,
+	SystemFeatures,
 	SystemHealth,
 	SystemMetrics,
 	UnifiedResponse,
 )
+from agente_fiscal.features import effective_flags
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +127,20 @@ def _parse_engram_observations(observations: list[dict]) -> list[dict]:
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────
+
+
+@router.get(
+	'/v1/system/features',
+	response_model=UnifiedResponse[SystemFeatures],
+	summary='Feature flags de integraciones',
+)
+async def get_system_features() -> UnifiedResponse[SystemFeatures]:
+	"""Retorna el estado efectivo de los feature flags de integración.
+
+	Refleja ``ARCA_ENABLED``, ``BROWSER_ENABLED`` y ``PDF_ENABLED`` tal como
+	se leyeron del entorno en el proceso actual.
+	"""
+	return UnifiedResponse(status='success', result=SystemFeatures(**effective_flags()))
 
 
 @router.get(

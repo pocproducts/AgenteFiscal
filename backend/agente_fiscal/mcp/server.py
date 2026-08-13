@@ -19,6 +19,7 @@ from agente_fiscal.config import get_settings
 from agente_fiscal.adapters.memory import FiscalMemoryClient
 from agente_fiscal.adapters.pdf_generator import PdfGenerator
 from agente_fiscal.domain.rules_engine import RulesEngine
+from agente_fiscal.features import integration_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +43,11 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
 	ta_cache = get_ta()
 	memory = FiscalMemoryClient()
 
-	# Browser: lazy init, only if env is configured
+	# Browser: lazy init, only if the integration is enabled AND env is set
 	browser = None
 	creds = get_settings().credentials
 	composio_key = creds.composio_api_key
-	if composio_key:
+	if composio_key and integration_enabled('browser'):
 		try:
 			from agente_fiscal.adapters.browser import ComposioBrowser
 
