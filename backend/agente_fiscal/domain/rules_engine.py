@@ -119,7 +119,9 @@ class RulesEngine:
 					# Saltar líneas vacías y comentarios
 					if not row or row[0].startswith('#'):
 						continue
-					if len(row) < 1:
+					# pragma: no cover — len(row) < 1 is impossible: `not row`
+					# above already short-circuits for empty csv.reader rows.
+					if len(row) < 1:  # pragma: no cover
 						continue
 					fecha_str = row[0].strip()
 					if not fecha_str:
@@ -380,7 +382,8 @@ class RulesEngine:
 
 			try:
 				dia = self._dia_vencimiento(key, ultimo_digito, mes)
-			except KeyError:
+			except KeyError:  # pragma: no cover — unreachable: the guard above
+				# already skips keys absent from _obligaciones_flat.
 				continue
 
 			# Validar que el día sea válido para el mes
