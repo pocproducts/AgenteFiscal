@@ -44,9 +44,12 @@ from agente_fiscal.api.store import RedisStore
 from agente_fiscal.config import get_settings
 from agente_fiscal.db.session import async_session_factory, engine
 from agente_fiscal.domain.models import ApiError, UnifiedResponse
+from agente_fiscal.telemetry import init_telemetry
 from agente_fiscal.worker.runner import start_worker
 
 logger = logging.getLogger(__name__)
+
+init_telemetry("backend-web")
 
 #: How often the background task re-attempts Redis when boot was degraded.
 _REDIS_RECONNECT_INTERVAL = 30

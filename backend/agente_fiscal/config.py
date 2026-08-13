@@ -107,6 +107,10 @@ class AppSettings(BaseSettings):
 	clerk_secret_key: str = Field(default='', alias='CLERK_SECRET_KEY')
 	clerk_domain: str = Field(default='', alias='CLERK_DOMAIN')
 
+	# ── Sentry (error/performance monitoring) ─────────────────────────────
+	sentry_dsn: str = Field(default='', alias='SENTRY_DSN')
+	app_env: str = Field(default='development', alias='APP_ENV')
+
 	# ── Resend (email delivery — adapters/resend_email.py) ───────────────
 	resend_api_key: str = Field(default='', alias='RESEND_API_KEY')
 	email_from: str = Field(
@@ -145,6 +149,10 @@ def get_settings() -> AppSettings:
 	Use ``monkeypatch`` in tests to override individual fields.
 	"""
 	return AppSettings()
+
+
+# Module-level shared singleton (imported by telemetry.py and others).
+settings = get_settings()
 
 
 # ── Shared constants ──────────────────────────────────────────────────────────────

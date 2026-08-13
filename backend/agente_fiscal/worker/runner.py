@@ -33,8 +33,11 @@ from agente_fiscal.config import REPRESENTANTE_CUIT, get_settings
 from agente_fiscal.db.models import Client, ReportRun
 from agente_fiscal.domain.models import ClientConfig
 from agente_fiscal.pipeline.service import PipelineService
+from agente_fiscal.telemetry import init_telemetry
 
 logger = logging.getLogger(__name__)
+
+init_telemetry("backend-worker")
 
 
 class _TaUnavailable(Exception):
