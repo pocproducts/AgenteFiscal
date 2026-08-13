@@ -31,6 +31,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 _CHECK_NAME = 'ck_report_runs_report_runs_status_check'
 
+#: Name that a pre-fix run of this migration produced by letting the metadata
+#: naming convention re-prefix the explicit name. Dropped defensively so the
+#: migration stays idempotent against both variants.
+_BUGGY_CHECK_NAME = 'ck_report_runs_ck_report_runs_report_runs_status_check'
+
 _LEGACY_ALLOWED = "status IN ('queued', 'running', 'done', 'failed')"
 _APPROVAL_ALLOWED = "status IN ('queued', 'running', 'done', 'failed', 'waiting_approval')"
 
@@ -41,9 +46,17 @@ def _recreate_status_check(condition: str) -> None:
         f'ALTER TABLE report_runs DROP CONSTRAINT IF EXISTS {_CHECK_NAME}'
     )
     op.execute(
+        f'ALTER TABLE report_runs DROP CONSTRAINT IF EXISTS {_BUGGY_CHECK_NAME}'
+    )
+    op.execute(
         'ALTER TABLE report_runs DROP CONSTRAINT IF EXISTS report_runs_status_check'
     )
-    op.create_check_constraint(_CHECK_NAME, 'report_runs', condition)
+    # op.f() marks the name as final so the metadata naming convention
+    # (ck_%(table_name)s_%(constraint_name)s) does NOT re-prefix it, keeping
+    # Alembic's DDL and Base.metadata.create_all() in agreement.
+    op.create_check_constraint(
+        op.f(_CHECK_NAME), 'report_runs', condition
+    )
 
 
 def upgrade() -> None:
