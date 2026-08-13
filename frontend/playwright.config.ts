@@ -52,11 +52,29 @@ export default defineConfig({
   /* Configure projects */
   projects: [
     {
+      name: "global setup",
+      testMatch: /e2e\/global\.setup\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+      },
+    },
+
+    {
       name: "e2e",
       testMatch: /e2e\/.*.test.ts/,
       use: {
         ...devices["Desktop Chrome"],
       },
+    },
+
+    {
+      name: "signed-in",
+      testMatch: /e2e\/.*\.signedin\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: "./playwright/.clerk/user.json",
+      },
+      dependencies: ["global setup"],
     },
 
     // {

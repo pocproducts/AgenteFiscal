@@ -106,7 +106,7 @@ instead of shipping its own tenant store (`api/store.py` Redis tenants) into pro
 1. **Business data → Postgres.** Redis stops being the source of truth for tenants, keys, plans, conversations.
 2. **Redis stays** for rate limiting, ARCA TA cache, JWKS cache, and (new) **the job queue**.
 3. **The pipeline is a job, not a request.** HTTP endpoints enqueue; workers execute; `report_runs` tracks state (this feeds the existing frontend "history" UI).
-4. **Auth/tenants are not rebuilt.** The Python API trusts Clerk JWTs verified by `frontend/`; it receives `userId`/`tenantId` per request and scopes everything by `tenantId`.
+4. **Auth/tenants are verified in the backend, not trusted from the client.** The Python API verifies the Clerk JWT itself (HS256 in dev, RS256+JWKS in prod, `api/middleware/clerk.py`) and resolves user → tenant → plan from Postgres (`db/auth.py`); every query is scoped by `tenant_id` derived from the verified token. The old "frontend verifies, backend trusts" claim is obsolete — it was replaced during the Phase 5 cutover.
 5. **No state on the web container filesystem.** Certs are secrets; PDFs go to object storage.
 
 ---
