@@ -102,9 +102,7 @@ class Client(UuidPkMixin, TimestampMixin, Base):
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     tenant: Mapped[Tenant] = relationship()
-    report_runs: Mapped[list[ReportRun]] = relationship(
-        back_populates='client', cascade='all, delete-orphan'
-    )
+    report_runs: Mapped[list[ReportRun]] = relationship(back_populates='client')
 
     __table_args__ = (
         UniqueConstraint('tenant_id', 'cuit', name='uq_clients_tenant_cuit'),

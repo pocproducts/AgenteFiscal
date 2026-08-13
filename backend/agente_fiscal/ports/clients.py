@@ -41,8 +41,44 @@ class ClientRepository(Protocol):
 		on a duplicate (tenant_id, cuit)."""
 		...
 
-	async def list_clients(self, tenant_id: uuid.UUID) -> list[Client]:
-		"""List all clients of a tenant, newest first."""
+	async def list_clients(
+		self,
+		tenant_id: uuid.UUID,
+		*,
+		limit: int = 50,
+		offset: int = 0,
+		q: str | None = None,
+		cuit: str | None = None,
+	) -> list[Client]:
+		"""List clients of a tenant, newest first, with pagination and filters."""
+		...
+
+	async def count_clients(
+		self,
+		tenant_id: uuid.UUID,
+		*,
+		q: str | None = None,
+		cuit: str | None = None,
+	) -> int:
+		"""Count clients matching the given filters for a tenant (for X-Total-Count)."""
+		...
+
+	async def update_client(
+		self,
+		tenant_id: uuid.UUID,
+		client_id: uuid.UUID,
+		*,
+		cuit: str | None = None,
+		name: str | None = None,
+		email: str | None = None,
+		config: dict | None = None,
+	) -> Client | None:
+		"""Partial-update a client, verifying tenant ownership.
+
+		Raises :class:`ClientAlreadyExistsError` if a new CUIT collides with an
+		existing (tenant_id, cuit). Returns ``None`` if the client doesn't exist
+		or belongs to another tenant.
+		"""
 		...
 
 	async def get_client(self, tenant_id: uuid.UUID, client_id: uuid.UUID) -> Client | None:
