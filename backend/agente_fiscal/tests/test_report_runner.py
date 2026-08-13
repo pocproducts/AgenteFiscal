@@ -386,6 +386,95 @@ async def test_fetch_next_queued_none_when_empty(test_session_factory) -> None:
     assert await _make_runner(test_session_factory)._fetch_next_queued() is None
 
 
+# ─── claim_next_queued (atomic claim) ───────────────────────────────────────
+
+
+async def test_claim_next_queued_oldest_first_flips_running(
+    test_session_factory, make_tenant
+) -> None:
+    async with test_session_factory() as session:
+        tenant = await make_tenant(session)
+    older = await _insert_run(
+        test_session_factory,
+        tenant.id,
+        status='done',
+        created_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+    )
+    first = await _insert_run(
+        test_session_factory,
+        tenant.id,
+        created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+    second = await _insert_run(
+        test_session_factory,
+        tenant.id,
+        created_at=datetime(2026, 6, 2, tzinfo=timezone.utc),
+    )
+
+    run_id = await _make_runner(test_session_factory).claim_next_queued()
+
+    # Oldest *queued* run wins (done rows are skipped), FIFO is preserved.
+    assert run_id == first.id
+    assert run_id != older.id
+    assert run_id != second.id
+
+    # The claim flip is committed in the SAME transaction: the row is now
+    # ``running`` with started_at set, so no other worker can pick it again.
+    claimed = await _get_run(test_session_factory, first.id)
+    assert claimed.status == 'running'
+    assert claimed.started_at is not None
+    assert (await _get_run(test_session_factory, second.id)).status == 'queued'
+    assert (await _get_run(test_session_factory, older.id)).status == 'done'
+
+
+async def test_claim_next_queued_none_when_empty(test_session_factory) -> None:
+    assert await _make_runner(test_session_factory).claim_next_queued() is None
+
+
+async def test_claim_next_queued_concurrent_no_double_claim(
+    test_session_factory, make_tenant
+) -> None:
+    """Two workers RACING on N queued rows — no row is ever claimed twice.
+
+    Exercises ``SELECT ... FOR UPDATE SKIP LOCKED``: the row lock is held
+    from SELECT time until the queued -> running flip commits, so a sibling
+    worker at BEST takes the next row and never the same one. This is the
+    regression test for the ``--workers 2`` double-execution bug.
+    """
+    async with test_session_factory() as session:
+        tenant = await make_tenant(session)
+    runs = [await _insert_run(test_session_factory, tenant.id) for _ in range(8)]
+
+    runner = _make_runner(test_session_factory)
+
+    async def worker() -> list:
+        claimed = []
+        while True:
+            run_id = await runner.claim_next_queued()
+            if run_id is None:
+                return claimed
+            claimed.append(run_id)
+            await asyncio.sleep(0)  # yield so the sibling task interleaves
+
+    worker_a, worker_b = await asyncio.gather(worker(), worker())
+
+    all_claimed = worker_a + worker_b
+    assert len(all_claimed) == len(runs)          # every row was claimed...
+    assert len(set(all_claimed)) == len(runs)     # ...exactly once (no duplicates)
+    assert set(all_claimed) == {r.id for r in runs}
+
+    # And every row now sits in ``running`` — none left queued, none done.
+    async with test_session_factory() as session:
+        remaining = (
+            await session.execute(
+                select(ReportRun.id).where(ReportRun.status == 'queued')
+            )
+        ).scalars().all()
+        statuses = set((await session.execute(select(ReportRun.status))).scalars().all())
+    assert remaining == []
+    assert statuses == {'running'}
+
+
 # ─── run_loop ───────────────────────────────────────────────────────────────
 
 

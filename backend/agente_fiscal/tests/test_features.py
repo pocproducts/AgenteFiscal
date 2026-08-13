@@ -13,6 +13,8 @@ Covers:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -50,6 +52,39 @@ def test_feature_flags_parse_env(monkeypatch) -> None:
 	assert settings.arca_enabled is True
 	assert settings.browser_enabled is True
 	assert settings.pdf_enabled is False
+
+
+# ── Config: CERT_DIR cert path resolution ───────────────────────────────────
+
+
+def test_cert_dir_default_value() -> None:
+	assert AppSettings().cert_dir == '.certificados-arca'
+
+
+def test_resolve_cert_paths_explicit_override() -> None:
+	from agente_fiscal.config import resolve_cert_paths
+
+	cert_dir, cert_path, key_path = resolve_cert_paths('/tmp/custom-certs')
+	assert cert_dir == Path('/tmp/custom-certs')
+	assert cert_path == Path('/tmp/custom-certs/produccion.crt')
+	assert key_path == Path('/tmp/custom-certs/produccion.key')
+
+
+def test_resolve_cert_paths_honors_cert_dir_env(monkeypatch) -> None:
+	"""The (previously dead) ``CERT_DIR`` env key now drives cert paths."""
+	from agente_fiscal.config import get_settings, resolve_cert_paths
+
+	get_settings.cache_clear()
+	monkeypatch.setenv('CERT_DIR', '.certs-staging')
+	try:
+		assert get_settings().cert_dir == '.certs-staging'
+		cert_dir, cert_path, key_path = resolve_cert_paths()
+		assert cert_dir == Path('.certs-staging')
+		assert cert_path == Path('.certs-staging/produccion.crt')
+		assert key_path == Path('.certs-staging/produccion.key')
+	finally:
+		get_settings.cache_clear()
+		monkeypatch.delenv('CERT_DIR', raising=False)
 
 
 # ── features module ────────────────────────────────────────────────────────
