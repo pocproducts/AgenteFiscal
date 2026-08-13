@@ -189,6 +189,25 @@ async def resolve_or_create_tenant(
             raise
 
 
+async def get_member_role(session: AsyncSession, tenant_id: UUID, clerk_user_id: str) -> str | None:
+    """Resolve the caller's role on a tenant (``owner``/``admin``/``member``).
+
+    Joins ``tenant_members`` to ``users`` by ``clerk_user_id`` so the role can
+    be read straight from the Clerk ``sub`` claim. Returns ``None`` when the
+    user has no membership row on that tenant. Used as the authorization gate
+    for the approval endpoints (only ``owner``/``admin`` may approve/reject).
+    """
+    return await session.scalar(
+        select(TenantMember.role)
+        .join(User, User.id == TenantMember.user_id)
+        .where(
+            TenantMember.tenant_id == tenant_id,
+            User.clerk_user_id == clerk_user_id,
+        )
+        .limit(1)
+    )
+
+
 def _to_plan(plan_row: PlanModel | None) -> Plan:
     """Map a catalog ``Plan`` row (or a missing row) to the pydantic ``Plan``.
 
@@ -258,6 +277,7 @@ async def get_active_plan(session: AsyncSession, tenant_id: UUID) -> Plan | None
 __all__ = [
     'TenantNotFoundError',
     'get_active_plan',
+    'get_member_role',
     'resolve_or_create_tenant',
     'resolve_or_create_user',
 ]

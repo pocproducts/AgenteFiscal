@@ -22,7 +22,7 @@ from agente_fiscal.worker import runner as runner_mod
 from agente_fiscal.adapters.browser import ComposioBrowser
 from agente_fiscal.db.models import ReportRun
 from agente_fiscal.domain.models import ClientConfig
-from agente_fiscal.pipeline.models import PipelineResult
+from agente_fiscal.pipeline.models import PipelineResult, ProposalOutcome
 from agente_fiscal.worker.runner import ReportRunner, start_worker
 
 pytestmark = pytest.mark.usefixtures('db_reset')
@@ -50,8 +50,13 @@ def _settings(arca: bool = True, browser: bool = False) -> SimpleNamespace:
     )
 
 
-def _pipeline_fake(result: PipelineResult | None = None, exc: Exception | None = None):
-    """A stand-in for PipelineService whose run_pipeline is deterministic."""
+def _pipeline_fake(
+    result: PipelineResult | None = None,
+    exc: Exception | None = None,
+    pending_actions: list[str] | None = None,
+):
+    """A stand-in for PipelineService whose proposal/execution phases are
+    deterministic (mirrors the real two-phase API the worker calls)."""
 
     class FakePipelineService:
         def __init__(self, engine, pdf_gen, memory_client=None):
@@ -59,10 +64,19 @@ def _pipeline_fake(result: PipelineResult | None = None, exc: Exception | None =
             self.pdf_gen = pdf_gen
             self.memory_client = memory_client
 
-        def run_pipeline(self, *args, progress_callback=None, **kwargs):
+        def run_proposal(self, *args, progress_callback=None, **kwargs):
             if progress_callback:
                 progress_callback('mock step 1')
                 progress_callback('mock step 2')
+            if exc is not None:
+                raise exc
+            return ProposalOutcome(
+                result=result, pending_actions=list(pending_actions or [])
+            )
+
+        def execute_actions(self, *args, actions=None, progress_callback=None, **kwargs):
+            if progress_callback:
+                progress_callback('mock resume step')
             if exc is not None:
                 raise exc
             return result

@@ -21,3 +21,17 @@ class PipelineResult(BaseModel):
 	email: bool = False
 	error: str | None = None
 	pdf_preview: str | None = None
+
+
+class ProposalOutcome(BaseModel):
+	"""Result of the proposal phase — pipeline result WITHOUT side effects.
+
+	``PipelineService.run_proposal`` computes everything up to (but excluding)
+	the outbound steps (email) and reports which side effects it WOULD run.
+	The unattended worker parks the run in ``waiting_approval`` when
+	``pending_actions`` is non-empty; offline callers (CLI/MCP/sync API)
+	execute them immediately because the operator IS the human.
+	"""
+
+	result: PipelineResult
+	pending_actions: list[str] = []

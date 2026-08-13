@@ -14,9 +14,10 @@ import logging
 from pathlib import Path
 from typing import Callable, Optional
 
+from agente_fiscal.domain.approvals import validate_actions
 from agente_fiscal.domain.models import AppConfig, ClientConfig, TipoContribuyente, TipoPersona
 from agente_fiscal.domain.rules_engine import RulesEngine
-from agente_fiscal.pipeline.models import PipelineResult
+from agente_fiscal.pipeline.models import PipelineResult, ProposalOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,7 @@ class PipelineService:
 			from_addr=getattr(settings, 'email_from', ''),
 		)
 
-	def run_pipeline(
+	def run_proposal(
 		self,
 		cliente: ClientConfig,
 		token: str,
@@ -202,11 +203,20 @@ class PipelineService:
 		config: Optional[AppConfig] = None,
 		output_dir: Optional[Path] = None,
 		progress_callback: Callable[[str], None] | None = None,
-	) -> PipelineResult:
-		"""Run the full fiscal pipeline for a single client.
+	) -> ProposalOutcome:
+		"""Run the PROPOSAL phase of the fiscal pipeline for a single client.
 
-		Mirrors the exact behaviour of ``_procesar_cliente_pipeline()``
-		but returns a typed ``PipelineResult`` instead of a raw dict.
+		Padrón A5 → Rules Engine → Browser extraction → PDF. It computes the
+		side effects the run WOULD perform (``'send_email'`` when an email
+		address is configured and sending is enabled, plus any future
+		high-risk fiscal actions from the catalog) but executes NONE of them
+		yet. Returns a :class:`ProposalOutcome` carrying the
+		``PipelineResult`` and the computed ``pending_actions`` list.
+
+		The unattended worker uses the outcome to gate the run on
+		``pending_actions`` (``waiting_approval``); offline callers
+		(CLI/MCP/sync API) follow it with :meth:`execute_actions` immediately
+		because the operator IS the human.
 
 		``config`` (``clients.yaml``-derived) no longer drives email — the
 		sender is resolved via ``_email_sender_obj()`` (Resend from settings by
@@ -385,20 +395,19 @@ class PipelineService:
 				deuda_error = deuda_output.error if deuda_output else ''
 				progress_callback(f'  ⚠️  Browser: salteando PDF (error en extracción — {deuda_error})')
 
-			# ── Email (solo si hay PDF generado) ─────────────────────────────────
-			if not browser_failed and send_email:
-				if not cliente.email:
+			# ── Side effects: compute what WOULD run, but DO NOT run it ────────
+			# The proposal phase stops before any outbound side effect. The
+			# unattended worker treats a non-empty ``pending_actions`` as a hard
+			# gate (status -> ``waiting_approval``); offline callers
+			# (CLI/MCP/sync API) execute them right after via ``execute_actions``.
+			pending_actions: list[str] = []
+			if not browser_failed:
+				if send_email and cliente.email:
+					pending_actions.append('send_email')
+				elif send_email:
 					progress_callback('  ⚠️  Sin email configurado — salteando envío')
 				else:
-					progress_callback(f'  Enviando email a {cliente.email} ...')
-					sender = self._email_sender_obj()
-					ok = sender.enviar(cliente, pdf_path, mes, anio)
-					resultado.email = ok
-					if self._memory_client is not None:
-						self._memory_client.save_pdf_sent(cliente.cuit, str(pdf_path), cliente.email, 'sent' if ok else 'failed')
-					progress_callback(f'  Email: {"✅" if ok else "❌"}')
-			elif not browser_failed:
-				progress_callback('  Email: omitido (--no-send)')
+					progress_callback('  Email: omitido (--no-send)')
 			else:
 				progress_callback('  Email: omitido (error en extracción)')
 
@@ -475,4 +484,123 @@ class PipelineService:
 				self._memory_client.save_pipeline_error(cliente.cuit, 'pipeline', str(exc))
 			progress_callback(f'  ❌ Error: {exc}')
 
+		return ProposalOutcome(result=resultado, pending_actions=pending_actions)
+
+	def execute_actions(
+		self,
+		cliente: ClientConfig,
+		*,
+		actions: list[str],
+		pdf_path: Path | str | None,
+		mes: int,
+		anio: int,
+		progress_callback: Callable[[str], None] | None = None,
+	) -> PipelineResult:
+		"""Execute EXACTLY the approved side effects and nothing else.
+
+		This is the execution phase of the human-in-the-loop flow: it performs
+		only the actions it was given (validated against the catalog). Today the
+		only implementable action is ``'send_email'``; the ``HIGH_RISK_ACTIONS``
+		entries are reserved for future integrations. Unknown actions raise
+		``ValueError`` via :func:`validate_actions` before any side effect.
+		"""
+		validate_actions(actions)
+		if progress_callback is None:
+			progress_callback = lambda _: None  # no-op
+
+		resultado = PipelineResult(cliente=cliente.nombre or cliente.cuit, cuit=cliente.cuit)
+		if pdf_path:
+			resultado.pdf = True
+			resultado.pdf_path = str(pdf_path)
+
+		if 'send_email' in actions:
+			self._execute_send_email(cliente, resultado, mes, anio, progress_callback)
+		for action in actions:
+			if action not in ('send_email',):
+				logger.info('[%s] Acción "%s" aún sin implementación — omitida', cliente.cuit, action)
 		return resultado
+
+	def _execute_send_email(
+		self,
+		cliente: ClientConfig,
+		resultado: PipelineResult,
+		mes: int,
+		anio: int,
+		progress_callback: Callable[[str], None],
+	) -> None:
+		"""Send the report PDF by email (no-op when the client lacks an email)."""
+		if not cliente.email:
+			progress_callback('  ⚠️  Sin email configurado — salteando envío')
+			return
+		progress_callback(f'  Enviando email a {cliente.email} ...')
+		sender = self._email_sender_obj()
+		ok = sender.enviar(cliente, resultado.pdf_path, mes, anio)
+		resultado.email = ok
+		if self._memory_client is not None and resultado.pdf_path:
+			self._memory_client.save_pdf_sent(
+				cliente.cuit, str(resultado.pdf_path), cliente.email, 'sent' if ok else 'failed'
+			)
+		progress_callback(f'  Email: {"✅" if ok else "❌"}')
+
+	def run_pipeline(
+		self,
+		cliente: ClientConfig,
+		token: str,
+		sign: str,
+		mes: int,
+		anio: int,
+		browser: Optional[object] = None,
+		*,
+		with_deuda: bool = False,
+		with_facilidades: bool = False,
+		with_registro: bool = False,
+		with_iibb: bool = False,
+		send_email: bool = True,
+		config: Optional[AppConfig] = None,
+		output_dir: Optional[Path] = None,
+		progress_callback: Callable[[str], None] | None = None,
+	) -> PipelineResult:
+		"""Run the FULL fiscal pipeline for a single client (proposal + execution).
+
+		Composes :meth:`run_proposal` with :meth:`execute_actions`, executing
+		every proposed side effect directly. This is the backward-compatible
+		entry point for OFFLINE callers — CLI, MCP, and the sync
+		``POST /v1/report`` — where the operator IS the human and approval is
+		implicit. The unattended worker does NOT call this; it uses the two
+		phases individually so it can park runs in ``waiting_approval``.
+		"""
+		if progress_callback is None:
+			progress_callback = lambda _: None  # no-op
+
+		outcome = self.run_proposal(
+			cliente,
+			token,
+			sign,
+			mes,
+			anio,
+			browser,
+			with_deuda=with_deuda,
+			with_facilidades=with_facilidades,
+			with_registro=with_registro,
+			with_iibb=with_iibb,
+			send_email=send_email,
+			config=config,
+			output_dir=output_dir,
+			progress_callback=progress_callback,
+		)
+		if outcome.result.error:
+			return outcome.result
+		if outcome.pending_actions:
+			progress_callback(
+				'  Acción(es) ejecutadas por el operador: '
+				+ ', '.join(outcome.pending_actions)
+			)
+			return self.execute_actions(
+				cliente,
+				actions=outcome.pending_actions,
+				pdf_path=outcome.result.pdf_path,
+				mes=mes,
+				anio=anio,
+				progress_callback=progress_callback,
+			)
+		return outcome.result

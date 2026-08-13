@@ -127,6 +127,10 @@ class ReportRun(UuidPkMixin, TimestampMixin, Base):
     error: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pending_actions: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     tenant: Mapped[Tenant] = relationship()
     client: Mapped[Client | None] = relationship(back_populates='report_runs')
@@ -136,7 +140,7 @@ class ReportRun(UuidPkMixin, TimestampMixin, Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('queued', 'running', 'done', 'failed')",
+            "status IN ('queued', 'running', 'done', 'failed', 'waiting_approval')",
             name='report_runs_status_check',
         ),
         Index('ix_report_runs_tenant_status', 'tenant_id', 'status', 'created_at'),

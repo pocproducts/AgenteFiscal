@@ -26,6 +26,7 @@ from agente_fiscal.config import get_settings
 from agente_fiscal.db.auth import (
     TenantNotFoundError,
     get_active_plan,
+    get_member_role,
     resolve_or_create_tenant,
 )
 from agente_fiscal.domain.models import Plan, PlanTier, Tenant
@@ -283,15 +284,18 @@ class ClerkJWTExtractor:
 		Context resolution is Postgres-backed (``db/auth.py``); Redis is used
 		only for the JWKS cache inside ``verify_jwt`` and may be ``None``.
 
-		Injected state (on success):
-			- ``auth_method`` = ``'clerk_jwt'``
-			- ``clerk_user_id`` — ``sub`` claim from token
-			- ``tenant_id`` — DB tenant UUID (org → ``tenants.clerk_org_id``;
-			  personal → deterministic UUIDv5 derived from the user)
-			- ``tenant`` — resolved pydantic ``Tenant``
-			- ``scopes`` = ``['chat:read', 'chat:write']``
-			- ``plan`` — resolved pydantic ``Plan``
-			- ``rate_limit_config`` — ``{'rpm': ..., 'rpd': ...}`` from plan
+Injected state (on success):
+		- ``auth_method`` = ``'clerk_jwt'``
+		- ``clerk_user_id`` — ``sub`` claim from token
+		- ``tenant_id`` — DB tenant UUID (org → ``tenants.clerk_org_id``;
+		  personal → deterministic UUIDv5 derived from the user)
+		- ``tenant`` — resolved pydantic ``Tenant``
+		- ``scopes`` = ``['chat:read', 'chat:write']``
+		- ``plan`` — resolved pydantic ``Plan``
+		- ``rate_limit_config`` — ``{'rpm': ..., 'rpd': ...}`` from plan
+		- ``user_role`` — ``owner``/``admin``/``member`` on the resolved
+		  tenant (defaults to ``'member'`` when no membership row exists);
+		  authorizes the approval endpoints
 
 		Returns:
 			``True`` when the JWT is valid and context was resolved.
@@ -328,6 +332,7 @@ class ClerkJWTExtractor:
 					display_name=display_name,
 				)
 				plan = await get_active_plan(session, tenant_row.id)
+				role = await get_member_role(session, tenant_row.id, sub)
 				await session.commit()
 			except TenantNotFoundError:
 				logger.info('Tenant no encontrado para org_id=%s (sub=%s)', org_id, sub[:12])
@@ -356,5 +361,6 @@ class ClerkJWTExtractor:
 		request.state.scopes = ['chat:read', 'chat:write']
 		request.state.plan = plan
 		request.state.rate_limit_config = {'rpm': rpm, 'rpd': rpd}
+		request.state.user_role = role or 'member'
 
 		return True

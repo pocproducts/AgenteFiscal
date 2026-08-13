@@ -2,12 +2,14 @@
 
 This is the SIMPLE, in-process async worker (no external queue). A single
 asyncio task polls ``report_runs`` rows with ``status='queued'``, executes the
-full (synchronous) ``PipelineService.run_pipeline`` for each, and updates the
-row ``queued -> running -> done/failed`` so a future GET can show live state.
+pipeline for each, and updates the row ``queued -> running -> done/failed`` so
+a future GET can show live state. Runs whose proposal phase reports pending
+high-risk actions are parked in ``waiting_approval`` (no side effect executed)
+until an administrator approves them back into ``queued`` or rejects them.
 
 Design notes:
-- The heavy ``run_pipeline`` call is blocking/synchronous. It runs inside
-  ``asyncio.to_thread`` so it does NOT block the event loop that drives the
+- The heavy proposal/execution calls are blocking/synchronous. They run inside
+  ``asyncio.to_thread`` so they do NOT block the event loop that drives the
   worker, the API, or other concurrent tasks.
 - Concurrency is intentionally 1: TA and the Composio browser are single
   session, so runs are never parallelized.
@@ -69,7 +71,15 @@ class ReportRunner:
 		"""Load one report run, execute its pipeline, and persist the outcome.
 
 		Any exception (including TA/browser issues) is caught and recorded as
-		``failed``; the row is always left with ``finished_at`` set.
+		``failed``; the row is normally left with ``finished_at`` set.
+
+		Human-in-the-loop: when the proposal phase reports pending high-risk
+		actions, the run is parked in ``waiting_approval`` — NO side effect is
+		executed and ``finished_at`` is NOT set — so an administrator can
+		approve/reject it before anything is emailed. After approval the run
+		returns to ``queued`` carrying ``steps['proposal_done']`` and
+		``steps['approved_actions']``; the next poll picks it up and executes
+		ONLY the approved actions (skip the proposal phase entirely).
 		"""
 		# Open a fresh scoped session for this run so the transaction is short.
 		async with self._session_factory() as session:
@@ -86,6 +96,9 @@ class ReportRunner:
 			steps = dict(run.steps or {})
 			progress_msgs: list[str] = []
 
+			def progress_callback(msg: str) -> None:
+				progress_msgs.append(msg)
+
 			try:
 				period = steps.get('period') or {}
 				mes = int(period.get('mes') or 0)
@@ -99,40 +112,70 @@ class ReportRunner:
 				if not mes or not anio:
 					raise ValueError('missing period in report_runs.steps (mes/anio)')
 
-				# ── ARCA feature gate (kill-switch, no network when disabled) ──
-				if not integration_enabled('arca', get_settings()):
-					raise IntegrationDisabledError('arca')
-
-				# ── TA (shared cache: CLI, API, MCP) ───────────────────────
-				token, sign = get_ta()
-				if not token or not sign:
-					raise _TaUnavailable()
-
 				cliente = await self._build_cliente(session, run)
-				browser = self._build_browser(
-					with_deuda or with_facilidades or with_registro or with_iibb
-				)
-
-				def progress_callback(msg: str) -> None:
-					progress_msgs.append(msg)
-
 				svc = PipelineService(self._engine, self._pdf_gen, self._memory_client)
-				# run_pipeline is blocking → offload to a thread so the loop stays responsive.
-				result = await asyncio.to_thread(
-					svc.run_pipeline,
-					cliente,
-					token,
-					sign,
-					mes,
-					anio,
-					browser,
-					with_deuda=with_deuda,
-					with_facilidades=with_facilidades,
-					with_registro=with_registro,
-					with_iibb=with_iibb,
-					send_email=True,
-					progress_callback=progress_callback,
-				)
+
+				is_resume = bool(steps.get('proposal_done'))
+				if is_resume:
+					# ── Execution phase only: resume after explicit approval ──
+					# The proposal already ran (padrón/rules/browser/PDF); the
+					# approved side effects are all that must happen now.
+					approved = list(steps.get('approved_actions') or [])
+					result = await asyncio.to_thread(
+						svc.execute_actions,
+						cliente,
+						actions=approved,
+						pdf_path=steps.get('proposal_pdf'),
+						mes=mes,
+						anio=anio,
+						progress_callback=progress_callback,
+					)
+				else:
+					# ── Fresh run: proposal phase (no outbound side effects) ──
+					# ── ARCA feature gate (kill-switch, no network when disabled) ──
+					if not integration_enabled('arca', get_settings()):
+						raise IntegrationDisabledError('arca')
+
+					# ── TA (shared cache: CLI, API, MCP) ───────────────────────
+					token, sign = get_ta()
+					if not token or not sign:
+						raise _TaUnavailable()
+
+					browser = self._build_browser(
+						with_deuda or with_facilidades or with_registro or with_iibb
+					)
+
+					outcome = await asyncio.to_thread(
+						svc.run_proposal,
+						cliente,
+						token,
+						sign,
+						mes,
+						anio,
+						browser,
+						with_deuda=with_deuda,
+						with_facilidades=with_facilidades,
+						with_registro=with_registro,
+						with_iibb=with_iibb,
+						send_email=True,
+						progress_callback=progress_callback,
+					)
+					result = outcome.result
+
+					if outcome.pending_actions:
+						# ── Human-in-the-loop gate ───────────────────────────
+						# Park the run WITHOUT executing any side effect. The
+						# poll loop only picks ``status == 'queued'``, so this
+						# row stays parked until an admin approves (→'queued' +
+						# proposal_done marker) or rejects (→ failed).
+						run.status = 'waiting_approval'
+						run.pending_actions = list(outcome.pending_actions)
+						if result.pdf_path:
+							steps['proposal_pdf'] = str(result.pdf_path)
+						steps['progress'] = progress_msgs
+						run.steps = steps
+						await session.commit()
+						return
 
 				steps['progress'] = progress_msgs
 				run.steps = steps
@@ -167,8 +210,11 @@ class ReportRunner:
 				run.status = 'failed'
 				run.error = {'code': 'RUN_FAILED', 'cause': str(exc)}
 			finally:
-				run.finished_at = datetime.now(timezone.utc)
-				await session.commit()
+				# A run parked for approval keeps ``finished_at`` NULL — its
+				# lifecycle continues once the human decides.
+				if run.status != 'waiting_approval':
+					run.finished_at = datetime.now(timezone.utc)
+					await session.commit()
 
 	async def _build_cliente(self, session: AsyncSession, run: ReportRun) -> ClientConfig:
 		"""Build the pipeline's ``ClientConfig``, resolving email/nombre from ``clients`` when linked.
