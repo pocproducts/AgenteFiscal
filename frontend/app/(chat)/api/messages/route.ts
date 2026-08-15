@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getChatById, getMessagesByChatId } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
 import { convertToUIMessages } from "@/lib/utils";
+import { tenantKey } from "@/lib/tenant";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -15,6 +16,7 @@ export async function GET(request: Request) {
   }
 
   const { userId, orgId } = await auth();
+  const tenant = tenantKey(orgId, userId);
 
   const [chat, messages] = await Promise.all([
     getChatById({ id: chatId }),
@@ -25,7 +27,7 @@ export async function GET(request: Request) {
     return new ChatbotError("not_found:chat").toResponse();
   }
 
-  const isOwner = !!userId && userId === chat.userId && orgId === chat.tenantId;
+  const isOwner = !!userId && userId === chat.userId && tenant === chat.tenantId;
 
   if (chat.visibility === "private" && !isOwner) {
     return new ChatbotError("forbidden:chat").toResponse();

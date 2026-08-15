@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from agente_fiscal.api.deps import CERT_PATH, KEY_PATH, REPRESENTANTE_CUIT, get_engine, get_memory, get_pdf_gen, get_ta
+from agente_fiscal.api.deps import CERT_PATH, KEY_PATH, REPRESENTANTE_CUIT, get_db_session, get_engine, get_memory, get_pdf_gen, get_ta
+from agente_fiscal.api.profile_gate import validate_active_profile
 from agente_fiscal.adapters.arca_ws import consultar_cuit
 from agente_fiscal.config import get_settings
 from agente_fiscal.domain.models import (
@@ -80,6 +83,9 @@ async def get_taxpayer(
 class ReportRequest(BaseModel):
 	"""Solicitud de pipeline fiscal completo."""
 
+	profile_id: uuid.UUID = Field(
+		description='Perfil ACTIVO del tenant que genera el reporte (invariante: obligatorio y ACTIVE)',
+	)
 	cuit: str = Field(
 		description='CUIT del contribuyente sin guiones',
 		examples=['20301234561'],
@@ -130,11 +136,18 @@ class ReportRequest(BaseModel):
 )
 async def report(
 	request: ReportRequest,
+	fastapi_request: Request,
+	session: AsyncSession = Depends(get_db_session),
 ):
 	"""Ejecuta el pipeline fiscal completo para un CUIT y período:
 	calcula calendario, genera PDF, extrae datos vía navegador y envía
 	email si está configurado.
+
+	Invariante: requiere un PERFIL ACTIVO del tenant (validación de ownership +
+	status). Sin profile_id/404/409 el pipeline NO corre.
 	"""
+	await validate_active_profile(fastapi_request, request.profile_id, session)
+
 	token, sign = get_ta()
 	if not token or not sign:
 		return UnifiedResponse(

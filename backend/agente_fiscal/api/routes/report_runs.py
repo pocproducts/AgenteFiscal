@@ -17,7 +17,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agente_fiscal.api.deps import get_db_session
-from agente_fiscal.db.models import ReportRun
+from agente_fiscal.api.profile_gate import validate_active_profile
+from agente_fiscal.db.models import Client, ReportRun
 from agente_fiscal.domain.approvals import validate_actions
 from agente_fiscal.domain.models import ApiError, UnifiedResponse
 
@@ -147,13 +148,16 @@ def _invalid_approval(cause: str) -> HTTPException:
 class CreateReportRunRequest(BaseModel):
 	"""Payload to enqueue a fiscal report run (execution happens later)."""
 
+	profile_id: uuid.UUID = Field(
+		description='Perfil activo del tenant que genera el reporte (invariante: obligatorio y ACTIVE)',
+	)
 	cuit: str = Field(
 		description='CUIT del contribuyente sin guiones (11 dígitos)',
 		examples=['20301234561'],
 	)
 	client_id: uuid.UUID | None = Field(
 		default=None,
-		description='Opcional: ID del cliente asociado al reporte',
+		description='Opcional: ID del cliente asociado al reporte (debe pertenecer al tenant)',
 	)
 	period: dict[str, Any] | None = Field(
 		default=None,
@@ -216,6 +220,25 @@ async def create_report_run(
 			),
 		)
 
+	# Invariante: solo se genera un reporte con un PERFIL ACTIVO del tenant.
+	await validate_active_profile(request, body.profile_id, session)
+
+	# Un client_id (si se envía) debe pertenecer al TENANT del run.
+	if body.client_id is not None:
+		client = await session.get(Client, body.client_id)
+		if client is None or client.tenant_id != tenant_uuid:
+			raise HTTPException(
+				status_code=422,
+				detail=UnifiedResponse(
+					status='error',
+					error=ApiError(
+						code='CLIENT_NOT_IN_TENANT',
+						cause='El client_id indicado no pertenece a tu tenant',
+						remediation='Usá un client_id del mismo tenant o enviá profile_id/cuit sin cliente',
+					),
+				).model_dump(),
+			)
+
 	# Stash optional config into the JSONB steps column.
 	steps: dict[str, Any] = {}
 	if body.period is not None:
@@ -223,12 +246,23 @@ async def create_report_run(
 	if body.flags is not None:
 		steps['flags'] = body.flags
 
+	period = body.period or {}
+	try:
+		period_month = int(period.get('mes')) if period.get('mes') is not None else None
+		period_year = int(period.get('anio')) if period.get('anio') is not None else None
+	except (TypeError, ValueError):
+		period_month = None
+		period_year = None
+
 	run = ReportRun(
 		tenant_id=tenant_uuid,
+		profile_id=body.profile_id,
 		client_id=body.client_id,
 		cuit=body.cuit,
 		status='queued',
 		steps=steps,
+		period_month=period_month,
+		period_year=period_year,
 	)
 
 	try:
@@ -251,6 +285,9 @@ async def create_report_run(
 		result={
 			'report_run_id': str(run.id),
 			'status': run.status,
+			'profile_id': str(run.profile_id),
+			'period_month': run.period_month,
+			'period_year': run.period_year,
 		},
 	)
 
@@ -313,7 +350,10 @@ async def get_report_run(
 		result={
 			'report_run_id': str(run.id),
 			'status': run.status,
+			'profile_id': str(run.profile_id),
 			'cuit': run.cuit,
+			'period_month': run.period_month,
+			'period_year': run.period_year,
 			'started_at': run.started_at.isoformat() if run.started_at else None,
 			'finished_at': run.finished_at.isoformat() if run.finished_at else None,
 			'steps': run.steps,

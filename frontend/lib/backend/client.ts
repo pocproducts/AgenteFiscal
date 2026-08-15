@@ -44,7 +44,7 @@ async function toBackendError(res: Response): Promise<BackendError> {
 }
 
 export interface CallBackendInit {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   timeoutMs?: number;
 }
@@ -83,6 +83,11 @@ export async function callBackend<T>(
     });
     if (!res.ok) {
       throw await toBackendError(res);
+    }
+    if (res.status === 204) {
+      // The backend's contract returns empty 204 bodies (e.g. DELETE). Avoid
+      // res.json() throwing "Unexpected end of JSON input" for these.
+      return undefined as T;
     }
     return (await res.json()) as T;
   } catch (err) {

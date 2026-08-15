@@ -30,3 +30,6 @@ tsconfig.tsbuildinfo
 # ARCA certs + app runtime storage — apply even when CWD is the repo root
 .certificados-arca/
 storage/
+
+# dev.sh runtime artifacts (pid files + logs)
+.run/

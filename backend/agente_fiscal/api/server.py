@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 
 from agente_fiscal.adapters.db_api_keys import PostgresApiKeyPort
 from agente_fiscal.adapters.db_clients import PostgresClientRepository
+from agente_fiscal.adapters.db_profiles import PostgresProfileRepository
 from agente_fiscal.api.middleware import (
 	AuthMiddleware,
 	RateLimitMiddleware,
@@ -37,6 +38,7 @@ from agente_fiscal.api.routes import (
 	health,
 	memory,
 	monitor,
+	profiles,
 	report,
 	report_runs,
 )
@@ -137,6 +139,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 	# go through the hexagonal ports (Postgres), never Redis.
 	app.state.api_key_port = PostgresApiKeyPort(async_session_factory)
 	app.state.client_repository = PostgresClientRepository(async_session_factory)
+	app.state.profile_repository = PostgresProfileRepository(async_session_factory)
 
 	# Fase 3 — in-process worker: polls queued report_runs and executes the
 	# heavy pipeline in the background. Starts before serving, stops on shutdown.
@@ -305,6 +308,10 @@ def custom_openapi() -> dict:
 			'description': 'CRUD de clientes (CUIT) del tenant autenticado',
 		},
 		{
+			'name': 'profiles',
+			'description': 'CRUD de perfiles (identidad del tenant) — gate obligatorio para generar reportes',
+		},
+		{
 			'name': 'memory',
 			'description': 'Memoria fiscal — observaciones de pipeline por CUIT',
 		},
@@ -335,6 +342,7 @@ app.include_router(extract.router, tags=['extract'])
 app.include_router(memory.router, tags=['memory'])
 app.include_router(admin.router, tags=['admin'])
 app.include_router(clients.router, tags=['clients'])
+app.include_router(profiles.router, tags=['profiles'])
 app.include_router(monitor.router, tags=['system'])
 app.include_router(chat.router, tags=['chat'])
 app.include_router(conversations.router)

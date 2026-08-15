@@ -101,8 +101,13 @@ class ReportRunner:
 
 			try:
 				period = steps.get('period') or {}
-				mes = int(period.get('mes') or 0)
-				anio = int(period.get('anio') or 0)
+				# Prefer the denormalised columns; fall back to steps['period']
+				# for runs queued before the columns existed (or without them).
+				mes = int(run.period_month or 0)
+				anio = int(run.period_year or 0)
+				if not mes or not anio:
+					mes = int(period.get('mes') or 0)
+					anio = int(period.get('anio') or 0)
 				flags = steps.get('flags') or {}
 				with_deuda = bool(flags.get('with_deuda'))
 				with_facilidades = bool(flags.get('with_facilidades'))

@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
 import { deleteAllChatsByUserId, getChatsByUserId } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
+import { tenantKey } from "@/lib/tenant";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -21,18 +22,15 @@ export async function GET(request: NextRequest) {
   }
 
   const { userId, orgId } = await auth();
+  const tenant = tenantKey(orgId, userId);
 
-  if (!userId) {
+  if (!userId || !tenant) {
     return new ChatbotError("unauthorized:chat").toResponse();
-  }
-
-  if (!orgId) {
-    return new ChatbotError("forbidden:auth").toResponse();
   }
 
   const chats = await getChatsByUserId({
     id: userId,
-    tenantId: orgId,
+    tenantId: tenant,
     limit,
     startingAfter,
     endingBefore,
@@ -43,16 +41,13 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE() {
   const { userId, orgId } = await auth();
+  const tenant = tenantKey(orgId, userId);
 
-  if (!userId) {
+  if (!userId || !tenant) {
     return new ChatbotError("unauthorized:chat").toResponse();
   }
 
-  if (!orgId) {
-    return new ChatbotError("forbidden:auth").toResponse();
-  }
-
-  const result = await deleteAllChatsByUserId({ userId, tenantId: orgId });
+  const result = await deleteAllChatsByUserId({ userId, tenantId: tenant });
 
   return Response.json(result, { status: 200 });
 }

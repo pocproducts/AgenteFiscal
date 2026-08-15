@@ -6,6 +6,7 @@ import {
   markChatMailSent,
 } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
+import { tenantKey } from "@/lib/tenant";
 
 export async function POST(
   request: Request,
@@ -14,7 +15,9 @@ export async function POST(
   const { id } = await params;
 
   const { userId, orgId } = await auth();
-  if (!userId) {
+  const tenant = tenantKey(orgId, userId);
+
+  if (!userId || !tenant) {
     return new ChatbotError("unauthorized:chat").toResponse();
   }
 
@@ -23,7 +26,7 @@ export async function POST(
     return new ChatbotError("not_found:chat").toResponse();
   }
 
-  const isOwner = !!userId && userId === chat.userId && orgId === chat.tenantId;
+  const isOwner = !!userId && userId === chat.userId && tenant === chat.tenantId;
 
   if (chat.visibility === "private" && !isOwner) {
     return new ChatbotError("forbidden:chat").toResponse();

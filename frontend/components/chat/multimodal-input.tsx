@@ -96,11 +96,7 @@ function PureMultimodalInput({
     ""
   );
 
-  const { profiles } = useProfiles();
-  const [activeProfileId, setActiveProfileId] = useLocalStorage<string>(
-    "active-profile-id",
-    profiles[0]?.id ?? ""
-  );
+  const { profiles, activeProfileId, setActiveProfileId } = useProfiles();
 
   useEffect(() => {
     if (textareaRef.current) {

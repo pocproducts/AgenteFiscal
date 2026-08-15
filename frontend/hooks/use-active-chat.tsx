@@ -92,6 +92,26 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
 
   const chatId = chatIdFromUrl ?? newChatIdRef.current;
 
+  // A composer launch carries `?profile=<id>`; seed it into localStorage
+  // (the `active-profile-id` key prepareSendMessagesRequest reads on every
+  // request) BEFORE the launch effect sends the first message. Covers
+  // deep-links/bookmarks where the composer's own localStorage write never
+  // ran (e.g. the same chat reopened later).
+  useEffect(() => {
+    const launchProfileId = searchParams.get("profile");
+    if (launchProfileId && typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(
+          "active-profile-id",
+          JSON.stringify(launchProfileId)
+        );
+      } catch {
+        // Ignore storage failures — prepareSendMessagesRequest falls back
+        // gracefully to an empty profile.
+      }
+    }
+  }, [searchParams]);
+
   const [currentModelId, setCurrentModelId] = useState(DEFAULT_CHAT_MODEL);
   const currentModelIdRef = useRef(currentModelId);
   useEffect(() => {

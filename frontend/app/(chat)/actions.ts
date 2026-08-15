@@ -14,6 +14,7 @@ import {
   updateChatVisibilityById,
 } from "@/lib/db/queries";
 import { getTextFromMessage } from "@/lib/utils";
+import { tenantKey } from "@/lib/tenant";
 
 export async function saveChatModelAsCookie(model: string) {
   const cookieStore = await cookies();
@@ -44,6 +45,7 @@ export async function deleteTrailingMessages({ id }: { id: string }) {
   if (!userId) {
     throw new Error("Unauthorized");
   }
+  const tenant = tenantKey(orgId, userId);
 
   const [message] = await getMessageById({ id });
   if (!message) {
@@ -51,7 +53,7 @@ export async function deleteTrailingMessages({ id }: { id: string }) {
   }
 
   const chat = await getChatById({ id: message.chatId });
-  if (!chat || chat.userId !== userId || chat.tenantId !== orgId) {
+  if (!chat || chat.userId !== userId || chat.tenantId !== tenant) {
     throw new Error("Unauthorized");
   }
 
@@ -72,6 +74,7 @@ export async function updateChatVisibility({
   if (!userId) {
     throw new Error("Unauthorized");
   }
+  const tenant = tenantKey(orgId, userId);
 
   const chat = await getChatById({ id: chatId });
 
@@ -79,7 +82,7 @@ export async function updateChatVisibility({
     return;
   }
 
-  if (chat.userId !== userId || chat.tenantId !== orgId) {
+  if (chat.userId !== userId || chat.tenantId !== tenant) {
     throw new Error("Unauthorized");
   }
 

@@ -335,6 +335,11 @@ export const translations = {
       emailLabel: "Email",
       emailPlaceholder: "user@acme.com",
       passwordLabel: "Password",
+      personalSpaceTitle: "Personal space",
+      personalSpaceHint:
+        "Continue without selecting an organization — your personal workspace is created automatically.",
+      personalSpaceCta: "Continue with my personal space",
+      orLabel: "or pick an organization below",
       errors: {
         invalidCredentials: "Invalid credentials!",
         failedValidation: "Failed validating your submission!",
@@ -412,6 +417,9 @@ export const translations = {
         planHint: "The following actions will run",
         run: "Run",
         cancel: "Cancel",
+        newProfile: "New profile",
+        selectProfileHint:
+          "Select a profile to enable the report actions",
       },
       billingWidgets: {
         tokensLabel: "Tokens",
@@ -858,6 +866,24 @@ export const translations = {
             authenticate: "Authenticate",
             noDomains: "No domains stored",
             createdOn: "Created on",
+            editDialogTitle: "Edit Profile",
+            editDialogDesc: "Update the name, CUIT, or status of this profile.",
+            cuitOptionalHint:
+              "Optional — leave empty to create the profile without a CUIT.",
+            statusLabel: "Status",
+            statusActive: "Active",
+            statusInactive: "Inactive",
+            statusHint: "Only active profiles can generate reports.",
+            cuitExists:
+              "Another profile already uses this CUIT in this tenant.",
+            unknownError: "Something went wrong. Please try again.",
+            saving: "Saving...",
+            cuitNone: "No CUIT",
+            deleteBlocked:
+              "Profile cannot be deleted because it has associated report runs. Mark it inactive instead.",
+            statusUpdated: "Profile status updated",
+            profileCreatedAt: "Created on",
+            loading: "Loading profiles...",
           },
         },
       },
@@ -1197,6 +1223,11 @@ export const translations = {
       emailLabel: "Correo electrónico",
       emailPlaceholder: "tu@email.com",
       passwordLabel: "Contraseña",
+      personalSpaceTitle: "Espacio personal",
+      personalSpaceHint:
+        "Continuá sin seleccionar una organización — tu espacio personal se crea automáticamente.",
+      personalSpaceCta: "Continuar con mi espacio personal",
+      orLabel: "o elegí una organización",
       errors: {
         invalidCredentials: "¡Credenciales inválidas!",
         failedValidation: "¡No se pudo validar tu envío!",
@@ -1277,6 +1308,9 @@ export const translations = {
         planHint: "Se van a ejecutar las siguientes acciones",
         run: "Ejecutar",
         cancel: "Cancelar",
+        newProfile: "Nuevo perfil",
+        selectProfileHint:
+          "Seleccioná un perfil para habilitar las acciones de reporte",
       },
       billingWidgets: {
         tokensLabel: "Tokens",
@@ -1727,6 +1761,23 @@ export const translations = {
             authenticate: "Autenticar",
             noDomains: "Sin dominios almacenados",
             createdOn: "Creado el",
+            editDialogTitle: "Editar perfil",
+            editDialogDesc: "Actualiza el nombre, el CUIT o el estado de este perfil.",
+            cuitOptionalHint:
+              "Opcional — dejalo vacío para crear el perfil sin CUIT.",
+            statusLabel: "Estado",
+            statusActive: "Activo",
+            statusInactive: "Inactivo",
+            statusHint: "Solo los perfiles activos pueden generar reportes.",
+            cuitExists: "Ya existe otro perfil con este CUIT en el tenant.",
+            unknownError: "Ocurrió un error. Intentá nuevamente.",
+            saving: "Guardando...",
+            cuitNone: "Sin CUIT",
+            deleteBlocked:
+              "El perfil no se puede eliminar porque tiene corridas de reporte asociadas. Marcalo como inactivo.",
+            statusUpdated: "Estado del perfil actualizado",
+            profileCreatedAt: "Creado el",
+            loading: "Cargando perfiles...",
           },
         },
       },

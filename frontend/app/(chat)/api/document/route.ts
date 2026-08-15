@@ -8,6 +8,7 @@ import {
   updateDocumentContent,
 } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
+import { tenantKey } from "@/lib/tenant";
 
 const documentSchema = z.object({
   content: z.string(),
@@ -28,8 +29,9 @@ export async function GET(request: Request) {
   }
 
   const { userId, orgId } = await auth();
+  const tenant = tenantKey(orgId, userId);
 
-  if (!userId) {
+  if (!userId || !tenant) {
     return new ChatbotError("unauthorized:document").toResponse();
   }
 
@@ -41,7 +43,7 @@ export async function GET(request: Request) {
     return new ChatbotError("not_found:document").toResponse();
   }
 
-  if (document.userId !== userId || document.tenantId !== orgId) {
+  if (document.userId !== userId || document.tenantId !== tenant) {
     return new ChatbotError("forbidden:document").toResponse();
   }
 
@@ -60,13 +62,10 @@ export async function POST(request: Request) {
   }
 
   const { userId, orgId } = await auth();
+  const tenant = tenantKey(orgId, userId);
 
-  if (!userId) {
+  if (!userId || !tenant) {
     return new ChatbotError("not_found:document").toResponse();
-  }
-
-  if (!orgId) {
-    return new ChatbotError("forbidden:document").toResponse();
   }
 
   let content: string;
@@ -92,7 +91,7 @@ export async function POST(request: Request) {
   if (documents.length > 0) {
     const [doc] = documents;
 
-    if (doc.userId !== userId || doc.tenantId !== orgId) {
+    if (doc.userId !== userId || doc.tenantId !== tenant) {
       return new ChatbotError("forbidden:document").toResponse();
     }
   }
@@ -108,7 +107,7 @@ export async function POST(request: Request) {
     title,
     kind,
     userId,
-    tenantId: orgId,
+    tenantId: tenant,
   });
 
   return Response.json(document, { status: 200 });
@@ -134,8 +133,9 @@ export async function DELETE(request: Request) {
   }
 
   const { userId, orgId } = await auth();
+  const tenant = tenantKey(orgId, userId);
 
-  if (!userId) {
+  if (!userId || !tenant) {
     return new ChatbotError("unauthorized:document").toResponse();
   }
 
@@ -143,7 +143,7 @@ export async function DELETE(request: Request) {
 
   const [document] = documents;
 
-  if (document.userId !== userId || document.tenantId !== orgId) {
+  if (document.userId !== userId || document.tenantId !== tenant) {
     return new ChatbotError("forbidden:document").toResponse();
   }
 

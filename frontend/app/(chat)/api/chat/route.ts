@@ -13,6 +13,7 @@ import {
   updateChatTitleById,
 } from "@/lib/db/queries";
 import { ChatbotError, type ErrorCode } from "@/lib/errors";
+import { tenantKey } from "@/lib/tenant";
 import { generateUUID } from "@/lib/utils";
 
 // Allow time for the real backend fiscal pipeline (ARCA WS calls, report
@@ -159,7 +160,11 @@ export async function POST(request: Request) {
     message: singularMessage,
     isToolApprovalFlow,
     selectedVisibilityType,
+    profileId,
   } = body;
+
+  const activeProfileId =
+    typeof profileId === "string" && profileId.trim() ? profileId.trim() : null;
 
   const visibility = selectedVisibilityType || "private";
   const uiMessages = singularMessage
@@ -167,13 +172,10 @@ export async function POST(request: Request) {
     : initialMessages || [];
 
   const { userId, orgId } = await auth();
+  const tenant = tenantKey(orgId, userId);
 
-  if (!userId) {
+  if (!userId || !tenant) {
     return new ChatbotError("unauthorized:chat").toResponse();
-  }
-
-  if (!orgId) {
-    return new ChatbotError("forbidden:auth").toResponse();
   }
 
   try {
@@ -205,7 +207,7 @@ export async function POST(request: Request) {
           await saveChat({
             id,
             userId,
-            tenantId: orgId,
+            tenantId: tenant,
             title,
             visibility,
             status: "running",
@@ -281,6 +283,10 @@ export async function POST(request: Request) {
               message: userText,
               conversation_id: id,
               history: history.length ? history : null,
+              // The backend reports REQUIRE an active profile_id (400
+              // REPORT_PROFILE_REQUIRED otherwise). Forward what the client
+              // sent (camelCase → profile_id) and never drop it.
+              profile_id: activeProfileId ?? undefined,
             },
             timeoutMs: 60_000,
           });

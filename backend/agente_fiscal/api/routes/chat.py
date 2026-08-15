@@ -67,10 +67,13 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, UUID4
 
+from agente_fiscal.api.profile_gate import ActiveProfileContext, validate_active_profile
 from agente_fiscal.api.store import RedisStore
+from agente_fiscal.db.models import ReportRun
 from agente_fiscal.domain.intent_router import Intent, detect
+from agente_fiscal.domain.models import ApiError, UnifiedResponse
 from agente_fiscal.domain.response_builder import format_reporte_response, format_taxpayer_response
 
 router = APIRouter()
@@ -98,6 +101,10 @@ class WizardRequest(BaseModel):
 	tasks: WizardTasks | None = Field(default=None, description='Tareas seleccionadas (null → solo descubrir cliente)')
 	send_email: bool = Field(default=False, description='Enviar reporte por email al cliente')
 	conversation_id: str | None = Field(default=None, description='Identificador de conversación (se genera si se omite)')
+	profile_id: UUID4 | None = Field(
+		default=None,
+		description='Perfil ACTIVO del tenant que genera el reporte (obligatorio para ejecutar el pipeline)',
+	)
 
 
 class WizardResponse(BaseModel):
@@ -123,6 +130,10 @@ class ChatRequest(BaseModel):
 		default=None,
 		description='Previous messages: [{"role": "user"|"assistant", "content": str}]',
 	)
+	profile_id: UUID4 | None = Field(
+		default=None,
+		description='Active tenant profile required to generate a report (REPORTE_COMPLETO intent)',
+	)
 
 
 class ChatResponse(BaseModel):
@@ -140,6 +151,96 @@ class ChatResponse(BaseModel):
 		default=None,
 		description='Structured results from backend queries',
 	)
+
+
+# ── Report-run persistence (active-profile invariant) ──────────────────────
+
+
+async def _resolve_active_profile(
+	fastapi_request: Request,
+	profile_id: UUID4 | None,
+) -> ActiveProfileContext | None:
+	"""Validate the active-profile invariant for a chat report request.
+
+	Returns ``None`` (no report generation needed) and otherwise the resolved
+	tenant/profile/user context, raising 401/400/404/409 via the shared gate.
+	"""
+	factory = getattr(fastapi_request.app.state, 'session_factory', None)
+	if factory is None:
+		raise HTTPException(
+			status_code=500,
+			detail=UnifiedResponse(
+				status='error',
+				error=ApiError(
+					code='REPORT_PERSIST_UNAVAILABLE',
+					cause='El store de persistencia (session_factory) no está disponible',
+					remediation='Revisa la configuración del servidor',
+				),
+			).model_dump(),
+		)
+	async with factory() as session:
+		return await validate_active_profile(
+			fastapi_request,
+			profile_id,
+			session,
+			missing_code=400,
+			not_found_code=404,
+			inactive_code=409,
+		)
+
+
+async def _persist_chat_report_run(
+	fastapi_request: Request,
+	*,
+	ctx: ActiveProfileContext,
+	cuit: str,
+	data: dict[str, Any] | None,
+	progress_msgs: list[str],
+	mes: int,
+	anio: int,
+) -> str | None:
+	"""Persist a ``report_runs`` row for a chat-driven report (done/failed).
+
+	Synchronous pipeline results land here after execution: status ``done`` on
+	success, ``failed`` with an ``error`` JSONB dict when the pipeline reported
+	an error or crashed. Returns the ``report_run_id`` (``None`` if the store is
+	unavailable) — the SSE/non-stream payload surfaces it for the history UI.
+	"""
+	factory = getattr(fastapi_request.app.state, 'session_factory', None)
+	if factory is None:
+		return None
+
+	if data is None or data.get('error'):
+		status = 'failed'
+		error = {'code': 'PIPELINE_FAILED', 'cause': str((data or {}).get('error') or 'Reporte fallido')}
+	else:
+		status = 'done'
+		error = None
+
+	steps: dict[str, Any] = {'source': 'chat'}
+	if progress_msgs:
+		steps['progress'] = list(progress_msgs)
+
+	run = ReportRun(
+		tenant_id=ctx.tenant_id,
+		profile_id=ctx.profile_id,
+		user_id=ctx.user_id,
+		cuit=cuit,
+		status=status,
+		steps=steps,
+		error=error,
+		period_month=mes,
+		period_year=anio,
+	)
+
+	async with factory() as session:
+		session.add(run)
+		try:
+			await session.commit()
+		except Exception:
+			await session.rollback()
+			return None
+	return str(run.id)
 
 
 # ── Sync handlers (run in thread pool to avoid blocking the event loop) ──────
@@ -526,6 +627,13 @@ async def chat_wizard(
 			cliente=cliente_info,
 		)
 
+	# ── Case 2b: active-profile invariant (report generation requires an ACTIVE profile) ──
+	report_ctx = await _resolve_active_profile(fastapi_request, request.profile_id)
+	from datetime import datetime
+
+	_chat_now = datetime.utcnow()
+	chat_mes, chat_anio = _chat_now.month, _chat_now.year
+
 	# ── Case 3: CUIT + tasks → processing (SSE) ───────────────────────
 	queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 	_loop = asyncio.get_running_loop()
@@ -558,6 +666,15 @@ async def chat_wizard(
 				reply = format_reporte_response(data, cuit, arca_error=get_ta_error())
 			else:
 				reply = format_reporte_response(data, cuit)
+			report_run_id = await _persist_chat_report_run(
+				fastapi_request,
+				ctx=report_ctx,
+				cuit=cuit,
+				data=data,
+				progress_msgs=_progress_messages,
+				mes=chat_mes,
+				anio=chat_anio,
+			)
 			pdf_url = None
 			if data and data.get('pdf_path'):
 				# Extract filename for download URL
@@ -573,6 +690,8 @@ async def chat_wizard(
 				'pdf_url': pdf_url,
 				'conversation_id': conversation_id,
 			}
+			if report_run_id:
+				complete_payload['report_run_id'] = report_run_id
 			if _progress_messages:
 				complete_payload['pipeline_steps'] = list(_progress_messages)
 			await queue.put(('complete', complete_payload))
@@ -705,6 +824,13 @@ async def chat_message_stream(
 			headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
 		)
 
+	# 3b. Active-profile invariant gate (report generation requires an ACTIVE profile).
+	report_ctx = await _resolve_active_profile(fastapi_request, request.profile_id)
+	from datetime import datetime
+
+	_chat_now = datetime.utcnow()
+	chat_mes, chat_anio = _chat_now.month, _chat_now.year
+
 	# 4. Streaming flow for REPORTE_COMPLETO
 	queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 	# Accumulate progress messages so they can be persisted + sent in complete event
@@ -723,6 +849,15 @@ async def chat_message_stream(
 		try:
 			data = await asyncio.to_thread(_handle_reporte_with_echo, cuit, _progress)
 			reply = format_reporte_response(data, cuit)
+			report_run_id = await _persist_chat_report_run(
+				fastapi_request,
+				ctx=report_ctx,
+				cuit=cuit,
+				data=data,
+				progress_msgs=_progress_messages,
+				mes=chat_mes,
+				anio=chat_anio,
+			)
 			if tenant_id and store is not None:
 				assistant_entry: dict[str, Any] = {'role': 'assistant', 'content': reply}
 				if _progress_messages:
@@ -742,6 +877,8 @@ async def chat_message_stream(
 				for k, v in data.items():
 					safe_data[k] = str(v) if not isinstance(v, (str, int, float, bool, list, dict, type(None))) else v
 			complete_payload: dict[str, Any] = {'reply': reply, 'data': safe_data, 'conversation_id': conversation_id}
+			if report_run_id:
+				complete_payload['report_run_id'] = report_run_id
 			if _progress_messages:
 				complete_payload['pipeline_steps'] = list(_progress_messages)
 			await queue.put(('complete', complete_payload))
@@ -865,6 +1002,17 @@ async def chat_message(
 			actions_taken=[],
 		)
 
+	# 3b. Active-profile invariant gate (report generation requires an ACTIVE profile).
+	if intent == Intent.REPORTE_COMPLETO:
+		report_ctx = await _resolve_active_profile(fastapi_request, request.profile_id)
+		from datetime import datetime
+
+		_chat_now = datetime.utcnow()
+		chat_mes, chat_anio = _chat_now.month, _chat_now.year
+	else:
+		report_ctx = None
+		chat_mes, chat_anio = None, None
+
 	# 4. Dispatch to sync handler in thread pool
 	action = _ACTION_NAMES.get(intent, 'unknown')
 
@@ -874,6 +1022,18 @@ async def chat_message(
 			reply = format_taxpayer_response(data, cuit)
 		elif intent == Intent.REPORTE_COMPLETO:
 			data = await asyncio.to_thread(_handle_reporte, cuit)
+			if report_ctx is not None:
+				report_run_id = await _persist_chat_report_run(
+					fastapi_request,
+					ctx=report_ctx,
+					cuit=cuit,
+					data=data,
+					progress_msgs=[],
+					mes=chat_mes,
+					anio=chat_anio,
+				)
+				if report_run_id and isinstance(data, dict):
+					data['report_run_id'] = report_run_id
 			reply = format_reporte_response(data, cuit)
 		else:
 			data = None

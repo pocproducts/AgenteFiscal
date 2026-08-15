@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { getChatById, getVotesByChatId, voteMessage } from "@/lib/db/queries";
 import { ChatbotError } from "@/lib/errors";
+import { tenantKey } from "@/lib/tenant";
 
 const voteSchema = z.object({
   chatId: z.string(),
@@ -21,8 +22,9 @@ export async function GET(request: Request) {
   }
 
   const { userId, orgId } = await auth();
+  const tenant = tenantKey(orgId, userId);
 
-  if (!userId) {
+  if (!userId || !tenant) {
     return new ChatbotError("unauthorized:vote").toResponse();
   }
 
@@ -32,7 +34,7 @@ export async function GET(request: Request) {
     return new ChatbotError("not_found:chat").toResponse();
   }
 
-  if (chat.userId !== userId || chat.tenantId !== orgId) {
+  if (chat.userId !== userId || chat.tenantId !== tenant) {
     return new ChatbotError("forbidden:vote").toResponse();
   }
 
@@ -59,8 +61,9 @@ export async function PATCH(request: Request) {
   }
 
   const { userId, orgId } = await auth();
+  const tenant = tenantKey(orgId, userId);
 
-  if (!userId) {
+  if (!userId || !tenant) {
     return new ChatbotError("unauthorized:vote").toResponse();
   }
 
@@ -70,7 +73,7 @@ export async function PATCH(request: Request) {
     return new ChatbotError("not_found:vote").toResponse();
   }
 
-  if (chat.userId !== userId || chat.tenantId !== orgId) {
+  if (chat.userId !== userId || chat.tenantId !== tenant) {
     return new ChatbotError("forbidden:vote").toResponse();
   }
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -22,6 +23,9 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from agente_fiscal.db.base import Base, TimestampMixin, UuidPkMixin
+
+if TYPE_CHECKING:  # pragma: no cover
+    from agente_fiscal.db.models.business import Profile
 
 
 class Tenant(UuidPkMixin, TimestampMixin, Base):
@@ -44,6 +48,7 @@ class Tenant(UuidPkMixin, TimestampMixin, Base):
     apps: Mapped[list[App]] = relationship(
         back_populates='tenant', cascade='all, delete-orphan'
     )
+    profiles: Mapped[list[Profile]] = relationship(back_populates='tenant')
 
     __table_args__ = (Index('uq_tenants_clerk_org_id', 'clerk_org_id', unique=True),)
 

@@ -12,7 +12,9 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
+    Integer,
     Numeric,
     String,
     UniqueConstraint,
@@ -44,11 +46,15 @@ class Conversation(UuidPkMixin, TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey('users.id', ondelete='SET NULL'), nullable=True
     )
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey('profiles.id', ondelete='SET NULL'), nullable=True
+    )
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default='running')
 
     tenant: Mapped[Tenant] = relationship()
     user: Mapped[User | None] = relationship()
+    profile: Mapped[Profile | None] = relationship()
     messages: Mapped[list[Message]] = relationship(
         back_populates='conversation', cascade='all, delete-orphan'
     )
@@ -60,6 +66,7 @@ class Conversation(UuidPkMixin, TimestampMixin, Base):
         ),
         Index('ix_conversations_tenant_id', 'tenant_id', 'created_at'),
         Index('ix_conversations_user_id', 'user_id'),
+        Index('ix_conversations_profile_id', 'profile_id'),
     )
 
 
@@ -102,10 +109,52 @@ class Client(UuidPkMixin, TimestampMixin, Base):
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     tenant: Mapped[Tenant] = relationship()
-    report_runs: Mapped[list[ReportRun]] = relationship(back_populates='client')
+    report_runs: Mapped[list[ReportRun]] = relationship(
+        back_populates='client', foreign_keys='ReportRun.client_id'
+    )
 
     __table_args__ = (
         UniqueConstraint('tenant_id', 'cuit', name='uq_clients_tenant_cuit'),
+        UniqueConstraint('tenant_id', 'id', name='uq_clients_tenant_id'),
+    )
+
+
+class Profile(UuidPkMixin, TimestampMixin, Base):
+    """Per-tenant system identity that aggregates reports, token spend and activity.
+
+    NOT a fiscal client (``Client`` stays the CUIT taxpayer). A profile is the
+    accountable actor for a tenant: every ``report_runs`` row MUST reference an
+    active profile of the same tenant (invariant enforced at the API boundary).
+    """
+
+    __tablename__ = 'profiles'
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey('tenants.id', ondelete='CASCADE'), nullable=False
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey('users.id', ondelete='SET NULL'), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    cuit: Mapped[str | None] = mapped_column(String(11), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default='active', server_default='active'
+    )
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    tenant: Mapped[Tenant] = relationship()
+    creator: Mapped[User | None] = relationship()
+    report_runs: Mapped[list[ReportRun]] = relationship(back_populates='profile')
+
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'cuit', name='uq_profiles_tenant_cuit'),
+        CheckConstraint(
+            "status IN ('active', 'inactive')",
+            name='profiles_status_check',
+        ),
+        Index('ix_profiles_tenant_id', 'tenant_id'),
+        Index('ix_profiles_tenant_status', 'tenant_id', 'status'),
+        Index('ix_profiles_created_by', 'created_by'),
     )
 
 
@@ -117,6 +166,12 @@ class ReportRun(UuidPkMixin, TimestampMixin, Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey('tenants.id', ondelete='CASCADE'), nullable=False
     )
+    profile_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey('profiles.id', ondelete='RESTRICT'), nullable=False
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey('users.id', ondelete='SET NULL'), nullable=True
+    )
     client_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey('clients.id', ondelete='SET NULL'), nullable=True
     )
@@ -125,6 +180,8 @@ class ReportRun(UuidPkMixin, TimestampMixin, Base):
     steps: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     result_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    period_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    period_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pending_actions: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
@@ -133,7 +190,11 @@ class ReportRun(UuidPkMixin, TimestampMixin, Base):
     rejection_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     tenant: Mapped[Tenant] = relationship()
-    client: Mapped[Client | None] = relationship(back_populates='report_runs')
+    profile: Mapped[Profile] = relationship(back_populates='report_runs')
+    user: Mapped[User | None] = relationship()
+    client: Mapped[Client | None] = relationship(
+        back_populates='report_runs', foreign_keys='ReportRun.client_id'
+    )
     generated_pdfs: Mapped[list[GeneratedPdf]] = relationship(
         back_populates='report_run', cascade='all, delete-orphan'
     )
@@ -145,6 +206,15 @@ class ReportRun(UuidPkMixin, TimestampMixin, Base):
         ),
         Index('ix_report_runs_tenant_status', 'tenant_id', 'status', 'created_at'),
         Index('ix_report_runs_client_id', 'client_id'),
+        Index('ix_report_runs_cuit', 'cuit'),
+        Index('ix_report_runs_tenant_profile_id', 'tenant_id', 'profile_id'),
+        # Tenant-consistency: a run's client (when set) must belong to the run's
+        # own tenant, not just any client with that id.
+        ForeignKeyConstraint(
+            ['client_id', 'tenant_id'],
+            ['clients.id', 'clients.tenant_id'],
+            name='fk_report_runs_client_tenant',
+        ),
     )
 
 
@@ -245,6 +315,9 @@ class TokenTransaction(UuidPkMixin, TimestampMixin, Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey('users.id', ondelete='SET NULL'), nullable=True
     )
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey('profiles.id', ondelete='SET NULL'), nullable=True
+    )
     type: Mapped[str] = mapped_column(String(32), nullable=False)
     delta: Mapped[int] = mapped_column(nullable=False)
     balance_after: Mapped[int] = mapped_column(nullable=False)
@@ -254,6 +327,7 @@ class TokenTransaction(UuidPkMixin, TimestampMixin, Base):
 
     tenant: Mapped[Tenant] = relationship()
     user: Mapped[User | None] = relationship()
+    profile: Mapped[Profile | None] = relationship()
 
     __table_args__ = (
         CheckConstraint(
@@ -262,6 +336,7 @@ class TokenTransaction(UuidPkMixin, TimestampMixin, Base):
         ),
         Index('ix_token_transactions_tenant_id', 'tenant_id', 'created_at'),
         Index('ix_token_transactions_reference', 'reference_type', 'reference_id'),
+        Index('ix_token_transactions_profile_id', 'profile_id'),
     )
 
 

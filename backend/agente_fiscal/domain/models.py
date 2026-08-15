@@ -576,19 +576,37 @@ class Tenant(BaseModel):
 
 
 class Client(BaseModel):
-	"""A CUIT taxpayer managed by a tenant (accounting firm).
+    """A CUIT taxpayer managed by a tenant (accounting firm).
 
-	Mirrors ``db.models.business.Client`` (Postgres, cutover Phase 5) —
-	the entity ``report_runs.client_id`` points at.
-	"""
+    Mirrors ``db.models.business.Client`` (Postgres, cutover Phase 5) —
+    the entity ``report_runs.client_id`` points at.
+    """
 
-	id: str
-	tenant_id: str
-	cuit: str
-	name: str
-	email: str | None = None
-	config: dict = Field(default_factory=dict)
-	created_at: datetime
+    id: str
+    tenant_id: str
+    cuit: str
+    name: str
+    email: str | None = None
+    config: dict = Field(default_factory=dict)
+    created_at: datetime
+
+
+class Profile(BaseModel):
+    """Per-tenant system identity that aggregates reports, token spend, activity.
+
+    Mirrors ``db.models.business.Profile``. NOT a fiscal client — a profile is
+    the accountable actor every ``report_runs`` row is tied to (invariant: MUST
+    be active and belong to the caller's tenant for any report generation).
+    """
+
+    id: str
+    tenant_id: str
+    created_by: str | None = None
+    name: str
+    cuit: str | None = None
+    status: str = 'active'
+    config: dict = Field(default_factory=dict)
+    created_at: datetime
 
 
 class Developer(BaseModel):
