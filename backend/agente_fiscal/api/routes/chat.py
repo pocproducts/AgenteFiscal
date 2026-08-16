@@ -75,7 +75,16 @@ from agente_fiscal.api.store import RedisStore
 from agente_fiscal.db.models import ReportRun
 from agente_fiscal.domain.intent_router import Intent, detect
 from agente_fiscal.domain.models import ApiError, UnifiedResponse
-from agente_fiscal.domain.response_builder import format_reporte_response, format_taxpayer_response
+from agente_fiscal.domain.response_builder import (
+	format_calendario_response,
+	format_consultaarca_response,
+	format_deuda_response,
+	format_facilidades_response,
+	format_rentas_response,
+	format_reporte_response,
+	format_taxpayer_response,
+)
+from agente_fiscal.domain.tool_spec import INTENT_TO_KEY, TOOL_SPECS, ToolSpec
 
 router = APIRouter()
 
@@ -340,16 +349,20 @@ def _handle_reporte(cuit: str) -> dict[str, Any] | None:
 		return {'error': str(exc)}
 
 
-def _handle_sistemaregistral(
+def _run_browser_tool(
+	spec: ToolSpec,
 	cuit: str,
 	echo_func: Optional[Callable[[str], None]] = None,
 	on_live_url: Optional[Callable[[str], None]] = None,
 	on_step: Optional[Callable[[int, str, str, str], None]] = None,
 ) -> dict[str, Any] | None:
-	"""Extrae el registro tributario real (Sistema Registral ARCA) vía ComposioBrowser.
+	"""Ejecuta una tool de browser (Phase-1) vía ComposioBrowser.
 
-	Reemplaza el stub TS `ejecutarSistemaRegistral`. Corre RegistroTask con el
-	CUIT del cliente y devuelve el RegistroOutput coherente con el CUIT.
+	Generalización de ``_handle_sistemaregistral``: para cualquier ToolSpec con
+	``needs_browser=True`` corre ``build_browser_tasks(**spec.task_flags)`` →
+	``ComposioBrowser.run_single`` → devuelve el dict de salida para el
+	formatter. Mantiene los guards existentes (COMPOSIO_KEY_MISSING /
+	INTEGRATION_DISABLED / BROWSER_ERROR).
 
 	``on_live_url`` se invoca en cuanto Composio provisiona la sesión de browser
 	(viva), para que el frontend pueda embeberla mientras la automatización corre.
@@ -369,7 +382,7 @@ def _handle_sistemaregistral(
 	if not creds.composio_api_key or not creds.clave_fiscal:
 		return {
 			'error': 'COMPOSIO_KEY_MISSING',
-			'detail': 'Falta COMPOSIO_API_KEY o ESTUDIO_CLAVE_FISCAL en .env para usar Sistema Registral.',
+			'detail': f'Falta COMPOSIO_API_KEY o ESTUDIO_CLAVE_FISCAL en .env para usar {spec.tool_name}.',
 		}
 	if not integration_enabled('browser'):
 		return {
@@ -387,7 +400,7 @@ def _handle_sistemaregistral(
 			cuit=REPRESENTANTE_CUIT,
 			clave=creds.clave_fiscal,
 			cliente_cuit=cuit,
-			with_registro=True,
+			**spec.task_flags,
 		)
 		out = browser.run_single(
 			ClientConfig(cuit=cuit),
@@ -402,6 +415,68 @@ def _handle_sistemaregistral(
 	if out.error:
 		return {'error': 'BROWSER_ERROR', 'detail': out.error, 'live_url': out.live_url}
 	return out.model_dump()
+
+
+def _run_engine_tool(
+	spec: ToolSpec,
+	cuit: str,
+	echo_func: Optional[Callable[[str], None]] = None,
+) -> dict[str, Any] | None:
+	"""Ejecuta una tool determinista (Phase-2) sin sessión de browser.
+
+	Design D1 (opción b): ``consultaarca`` → padrón A5 (``arca_ws.consultar_cuit``);
+	``calendariovencimientosarca`` → ``RulesEngine.calcular``. Reusa los códigos
+	de error de ``routes/calendar.py`` (TA_UNAVAILABLE | TAXPAYER_QUERY_FAILED |
+	TAXPAYER_NOT_FOUND | CALENDAR_FAILED) y emite un ``progress`` por etapa.
+	"""
+	from datetime import datetime
+
+	from agente_fiscal.api.deps import REPRESENTANTE_CUIT, get_engine, get_ta
+	from agente_fiscal.adapters.arca_ws import consultar_cuit
+
+	token, sign = get_ta()
+	if not token or not sign:
+		return {'error': 'TA_UNAVAILABLE', 'detail': 'No se pudo obtener Ticket de Acceso de ARCA'}
+
+	if echo_func:
+		echo_func('  Consultando Padrón A5 ...')
+	try:
+		result = consultar_cuit(cuit, token, sign, REPRESENTANTE_CUIT)
+		output = result.to_output()
+	except Exception as exc:
+		return {'error': 'TAXPAYER_QUERY_FAILED', 'detail': str(exc)}
+
+	if output.errorConstancia:
+		errors = '; '.join(output.errorConstancia.error)
+		return {'error': 'TAXPAYER_NOT_FOUND', 'detail': errors}
+
+	if spec.tool_key == 'consultaarca':
+		return result.to_dict()
+
+	if spec.tool_key == 'calendariovencimientosarca':
+		if echo_func:
+			echo_func('  Calculando calendario fiscal ...')
+		now = datetime.utcnow()
+		engine = get_engine()
+		try:
+			calendario = engine.calcular(output, now.month, now.year)
+		except Exception as exc:
+			return {'error': 'CALENDAR_FAILED', 'detail': str(exc)}
+		# mode='json': date/Decimal → ISO/float, seguro para SSE.
+		return calendario.model_dump(mode='json')
+
+	return {'error': 'BROWSER_ERROR', 'detail': f'Motor no implementado para tool {spec.tool_key}'}
+
+
+def _handle_tool_data(
+	spec: ToolSpec,
+	cuit: str,
+	echo_func: Optional[Callable[[str], None]] = None,
+) -> dict[str, Any] | None:
+	"""Dispatch no-streaming de una tool: browser o motor según el ToolSpec."""
+	if spec.needs_browser:
+		return _run_browser_tool(spec, cuit, echo_func=echo_func)
+	return _run_engine_tool(spec, cuit, echo_func=echo_func)
 
 
 def format_registro_response(data: dict[str, Any] | None, cuit: str) -> str:
@@ -453,6 +528,41 @@ def format_registro_response(data: dict[str, Any] | None, cuit: str) -> str:
 	lines.append('')
 	lines.append('_Datos obtenidos del Sistema Registral ARCA en vivo (CUIT coherente)._')
 	return '\n'.join(lines)
+
+
+# ── Resolver de formatters por ToolSpec ─────────────────────────────────────
+# ``format_registro_response`` vive en este módulo (chat.py, design: reusarlo
+# vía ``formatter_name``); los 5 restantes en domain/response_builder.py.
+
+_FORMATTERS: dict[str, Callable[[dict[str, Any] | None, str], str]] = {
+	'format_registro_response': format_registro_response,
+	'format_deuda_response': format_deuda_response,
+	'format_facilidades_response': format_facilidades_response,
+	'format_rentas_response': format_rentas_response,
+	'format_consultaarca_response': format_consultaarca_response,
+	'format_calendario_response': format_calendario_response,
+}
+
+
+def _resolve_formatter(formatter_name: str) -> Callable[[dict[str, Any] | None, str], str]:
+	"""Resuelve el formatter por nombre desde el registro del dispatch."""
+	formatter = _FORMATTERS.get(formatter_name)
+	if formatter is None:
+		raise KeyError(f'formatter no registrado: {formatter_name}')
+	return formatter
+
+
+def _json_safe(data: dict[str, Any] | None) -> dict[str, Any] | None:
+	"""Aplana valores no serializables (datetime, date, PosixPath…) a str."""
+	if not data:
+		return None
+	safe: dict[str, Any] = {}
+	for k, v in data.items():
+		if isinstance(v, (str, int, float, bool, list, dict, type(None))):
+			safe[k] = v
+		else:
+			safe[k] = str(v)
+	return safe
 
 
 # ── Streaming handler (accepts echo_func for progress) ───────────────────
@@ -920,11 +1030,14 @@ async def chat_message_stream(
 			headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
 		)
 
-	if intent == Intent.SISTEMA_REGISTRAL:
-		# ── Streaming for Sistema Registral ──────────────────────────────
-		# Emits `live_url` as soon as Composio provisions the browser session
-		# (mid-run) so the UI can embed the LIVE browser, plus `complete` with
-		# the registral result. Reuses the same SSE framing as REPORTE_COMPLETO.
+	tool_key = INTENT_TO_KEY.get(intent)
+	if tool_key is not None:
+		# ── Streaming genérico de browser tools (ToolSpec dispatch) ──────
+		# Emite `conversation_start` → `progress*` → (`live_url` + `agent_step`
+		# solo con sesión Composio viva) → `complete`. Reusa el mismo framing
+		# SSE que REPORTE_COMPLETO; engines deterministas (consultaarca /
+		# calendariovencimientosarca) no emiten live_url/agent_step.
+		spec = TOOL_SPECS[tool_key]
 		queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 		_loop = asyncio.get_running_loop()
 		_progress_messages: list[str] = []
@@ -939,15 +1052,14 @@ async def chat_message_stream(
 		def _on_step(step, goal, url, status='running'):
 			_loop.call_soon_threadsafe(queue.put_nowait, ('agent_step', {'step': step, 'goal': goal, 'url': url, 'status': status}))
 
-		async def _run_sr():
+		async def _run_tool():
 			try:
-				data = await asyncio.to_thread(_handle_sistemaregistral, cuit, _progress, _on_live_url, _on_step)
-				reply = format_registro_response(data, cuit)
-				safe_data: dict[str, Any] | None = None
-				if data:
-					safe_data = {}
-					for k, v in data.items():
-						safe_data[k] = str(v) if not isinstance(v, (str, int, float, bool, list, dict, type(None))) else v
+				if spec.needs_browser:
+					data = await asyncio.to_thread(_run_browser_tool, spec, cuit, _progress, _on_live_url, _on_step)
+				else:
+					data = await asyncio.to_thread(_run_engine_tool, spec, cuit, _progress)
+				reply = _resolve_formatter(spec.formatter_name)(data, cuit)
+				safe_data = _json_safe(data)
 				if tenant_id and store is not None:
 					assistant_entry: dict[str, Any] = {'role': 'assistant', 'content': reply}
 					if _progress_messages:
@@ -966,13 +1078,13 @@ async def chat_message_stream(
 				await queue.put(
 					(
 						'complete',
-						{'reply': f'Ocurrió un error al consultar Sistema Registral: {exc}', 'data': None, 'conversation_id': conversation_id},
+						{'reply': f'Ocurrió un error al consultar {spec.tool_name}: {exc}', 'data': None, 'conversation_id': conversation_id},
 					)
 				)
 
-		async def _generate_sr():
+		async def _generate_tool():
 			yield f'event: conversation_start\ndata: {json.dumps({"conversation_id": conversation_id})}\n\n'
-			task = asyncio.create_task(_run_sr())
+			task = asyncio.create_task(_run_tool())
 			while True:
 				event_type, payload = await queue.get()
 				if event_type == 'progress':
@@ -987,7 +1099,7 @@ async def chat_message_stream(
 			await task
 
 		return StreamingResponse(
-			_generate_sr(),
+			_generate_tool(),
 			media_type='text/event-stream',
 			headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'},
 		)
@@ -1226,9 +1338,10 @@ async def chat_message(
 				if report_run_id and isinstance(data, dict):
 					data['report_run_id'] = report_run_id
 			reply = format_reporte_response(data, cuit)
-		elif intent == Intent.SISTEMA_REGISTRAL:
-			data = await asyncio.to_thread(_handle_sistemaregistral, cuit)
-			reply = format_registro_response(data, cuit)
+		elif intent in INTENT_TO_KEY:
+			spec = TOOL_SPECS[INTENT_TO_KEY[intent]]
+			data = await asyncio.to_thread(_handle_tool_data, spec, cuit)
+			reply = _resolve_formatter(spec.formatter_name)(data, cuit)
 		else:
 			data = None
 			reply = 'Intento no soportado.'
