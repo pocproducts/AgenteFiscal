@@ -57,6 +57,7 @@ export function useAgentSidebar() {
         agentId,
         toolName,
         messageId,
+        startedAt: Date.now(),
         status: "idle",
         tasks: buildSubtasksForTool(toolKey),
         totalCostCents: 0,
@@ -130,7 +131,12 @@ export function useAgentSidebar() {
   const updateSession = useCallback(
     (
       agentId: string,
-      patch: Partial<Pick<AgentSession, "status" | "startedAt" | "completedAt">>
+      patch: Partial<
+        Pick<
+          AgentSession,
+          "status" | "startedAt" | "completedAt" | "liveUrl" | "windowMs"
+        >
+      >
     ) => {
       setLocalState((prev) => {
         const current = prev ?? initialAgentSidebarState;
@@ -195,6 +201,7 @@ export function useAgentSidebar() {
             startedAt: snapshot.startedAt,
             completedAt: snapshot.completedAt,
             totalCostCents: snapshot.totalCostCents,
+            windowMs: snapshot.windowMs,
           };
         }
 

@@ -108,6 +108,8 @@ class ComposioBrowser:
 		# Override for the retry policy: None keeps the per-task defaults
 		# (3 for facilidades / long tasks, 1 otherwise).
 		self._retry_max_attempts = default_max_retries
+		# Last Composio live session URL captured during the run (surfaced to API).
+		self._live_url = ''
 		self._http_headers = {
 			'x-api-key': self._api_key,
 			'Content-Type': 'application/json',
@@ -269,6 +271,7 @@ class ComposioBrowser:
 		task_id: str,
 		timeout: int = COMPOSIO_DEFAULT_TIMEOUT,
 		echo_func: Optional[Callable[[str], None]] = None,
+		on_step: Optional[Callable[[int, str, str, str], None]] = None,
 	) -> dict[str, Any]:
 		"""BROWSER_TOOL_WATCH_TASK — Pollear tarea hasta completitud o timeout.
 
@@ -305,18 +308,32 @@ class ComposioBrowser:
 
 			status = result.get('status', 'started')
 			current_step_val = result.get('current_step')
-			if current_step_val is not None and current_step_val != last_step:
+			if current_step_val is not None and current_step_val > last_step:
+				# Emit EVERY step, not just the latest poll snapshot. The long-poll
+				# API reports the CURRENT step; without this gap-fill the UI would
+				# only see ~1 event per poll tick and never match the real number
+				# of steps the Composio session executed (p.ej. 24 pasos reales
+				# mostrados como "4 tareas" en el monitor).
 				goal = result.get('current_goal', '') or ''
 				url = result.get('current_url', '') or ''
-				if goal:
-					logger.info('  🎯 Step %s: %s', current_step_val, goal[:300])
-					if echo_func:
-						echo_func(f'  🔍 Step {current_step_val}: {goal[:200]}')
-					if url:
-						logger.info('     ↳ %s', url[:200])
-				else:
-					logger.info('  ⏳ Step %s', current_step_val)
-			last_step = result.get('current_step', last_step)
+				for step_no in range(last_step + 1, current_step_val + 1):
+					if on_step:
+						on_step(
+							step_no,
+							goal if step_no == current_step_val else f'Paso {step_no}',
+							url if step_no == current_step_val else '',
+							'running',
+						)
+					if step_no == current_step_val:
+						if goal:
+							logger.info('  🎯 Step %s: %s', step_no, goal[:300])
+							if echo_func:
+								echo_func(f'  🔍 Step {step_no}: {goal[:200]}')
+							if url:
+								logger.info('     ↳ %s', url[:200])
+						else:
+							logger.info('  ⏳ Step %s', step_no)
+				last_step = current_step_val
 
 			if status == 'finished':
 				logger.info(
@@ -324,6 +341,8 @@ class ComposioBrowser:
 					task_id,
 					result.get('is_success'),
 				)
+				if on_step:
+					on_step(last_step or 0, '', '', 'finished')
 				return result
 
 			if status in ('failed', 'stopped'):
@@ -374,6 +393,8 @@ class ComposioBrowser:
 		cliente: ClientConfig,
 		tasks: Optional[list[BrowserTask]] = None,
 		echo_func: Optional[Callable[[str], None]] = None,
+		on_live_url: Optional[Callable[[str], None]] = None,
+		on_step: Optional[Callable[[int, str, str, str], None]] = None,
 	) -> DeudaOutput:
 		"""Procesa un cliente con N tasks Composio en sesión compartida.
 
@@ -473,16 +494,19 @@ class ComposioBrowser:
 							try:
 								session_info = await self._get_session(current_session_id)
 								live_url = session_info.get('liveUrl', '')
+								self._live_url = live_url
 								if live_url:
-									logger.info('  🔗 Live: %s', live_url)
-									if echo_func:
-										echo_func(f'  🔗 Live: {live_url}')
+									logger.info('  ⛓ Live: %s', live_url)
+								if echo_func:
+									echo_func(f'  ⛓ Live: {live_url}')
+								if on_live_url:
+									on_live_url(live_url)
 							except Exception as e:
 								logger.debug('No se pudo obtener URL de sesión para %s: %s', task.name, e)
 
 						# ── WATCH_TASK con timeout individual ───────────────────
 						task_start = time.monotonic()
-						output = await self._watch_task(task_id, timeout=task.timeout, echo_func=echo_func)
+						output = await self._watch_task(task_id, timeout=task.timeout, echo_func=echo_func, on_step=on_step)
 						task_duration = time.monotonic() - task_start
 						raw = str(output.get('output', output.get('data', '')))
 						total_steps = output.get('current_step', 0)
@@ -972,6 +996,7 @@ class ComposioBrowser:
 			plan_pagos=plan_pagos,
 			facilidades=facilidades,
 			registro=registro,
+			live_url=self._live_url,
 			error=None,
 		)
 
@@ -1024,6 +1049,8 @@ class ComposioBrowser:
 		cliente: ClientConfig,
 		tasks: Optional[list[BrowserTask]] = None,
 		echo_func: Optional[Callable[[str], None]] = None,
+		on_live_url: Optional[Callable[[str], None]] = None,
+		on_step: Optional[Callable[[int, str, str, str], None]] = None,
 	) -> DeudaOutput:
 		"""Sync wrapper para _run_single. Crea su propio event loop.
 
@@ -1036,7 +1063,7 @@ class ComposioBrowser:
 		    ``DeudaOutput`` con resultado o error. Nunca propaga excepción.
 		"""
 		try:
-			return asyncio.run(self._run_single(cliente, tasks=tasks, echo_func=echo_func))
+			return asyncio.run(self._run_single(cliente, tasks=tasks, echo_func=echo_func, on_live_url=on_live_url, on_step=on_step))
 		except Exception as e:
 			logger.error('run_single error for %s: %s', cliente.cuit, e)
 			return DeudaOutput(

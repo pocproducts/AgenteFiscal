@@ -21,14 +21,21 @@ export const AgenteTrabajandoButton = ({
   } = useAgentSidebar();
   const { setArtifact } = useArtifact();
 
-  // Find the session that matches this tool (by toolName from the stream)
-  // We match by toolName since agentId is only known after the session-start event.
+  // Find the session for THIS chat message: prefer the one created for this
+  // messageId (the merged optimistic session keeps it), then the most recent
+  // matching tool run. First-match by toolName alone could re-open an old
+  // completed session from a previous message.
+  const normalizedToolName = toolName.toLowerCase().replace(/[^a-z]/g, "");
+  const matching = allSessions.filter(
+    (s) =>
+      s.toolName.toLowerCase().replace(/[^a-z]/g, "") === normalizedToolName
+  );
   const session =
-    allSessions.find(
-      (s) =>
-        s.toolName.toLowerCase().replace(/[^a-z]/g, "") ===
-        toolName.toLowerCase().replace(/[^a-z]/g, "")
-    ) ?? null;
+    matching.find((s) => s.messageId === messageId) ??
+    [...matching].sort(
+      (a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0)
+    )[0] ??
+    null;
 
   const isCompleted = session?.status === "completed";
 

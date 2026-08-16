@@ -353,6 +353,8 @@ class DeudaOutput(BaseModel):
 	facilidades: List[FacilidadPlan] = Field(default_factory=list)
 	# Registro tributario IIBB + impuestos
 	registro: Optional[RegistroOutput] = None
+	# URL de la sesión de browser Composio (visible en vivo), si está disponible
+	live_url: Optional[str] = None
 
 
 # ─── Padrón A5: modelos de datos AFIP ───────────────────────────────────────

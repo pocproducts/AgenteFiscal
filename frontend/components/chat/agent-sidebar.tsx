@@ -2,6 +2,7 @@
 
 import {
   CheckCircle2,
+  CircleAlert,
   CircleDashed,
   Clock,
   Cpu,
@@ -16,6 +17,8 @@ import {
 } from "lucide-react";
 import type { AgentSession, AgentTask } from "@/hooks/use-agent-sidebar";
 import { useAgentSidebar } from "@/hooks/use-agent-sidebar";
+import { useLiveClock } from "@/hooks/use-live-clock";
+import { AGENT_SESSION_WINDOW_MS, formatClock } from "@/lib/agent-window";
 import { useLanguage } from "@/lib/i18n";
 import { cn, interpolate } from "@/lib/utils";
 
@@ -88,12 +91,12 @@ function formatCost(cents: number): string {
   return `$${(cents / 100).toFixed(4)}`;
 }
 
-function sessionElapsed(session: AgentSession): string {
+function sessionElapsed(session: AgentSession, nowMs = Date.now()): string {
   if (!session.startedAt) {
     return "—";
   }
-  const end = session.completedAt ?? Date.now();
-  return formatDuration(end - session.startedAt);
+  const end = session.completedAt ?? nowMs;
+  return formatClock(end - session.startedAt);
 }
 
 // ── EmbeddedBrowser ────────────────────────────────────────────────────────────
@@ -103,7 +106,32 @@ function EmbeddedBrowser({ session }: { session: AgentSession }) {
   const meta = getToolMeta(session.toolName);
   const isCompleted = session.status === "completed";
   const isRunning = session.status === "running";
+  const isError = session.status === "error";
   const agent = t.panel.sidebar.agent;
+
+  // LIVE state: embed the real browser full-bleed and let the live browser
+  // itself own the URL bar and the expand/open-in-new-tab control — the user
+  // explicitly wants THAT button, not our fake chrome.
+  if (session.liveUrl) {
+    return (
+      <div className="rounded-xl border border-border/40 bg-background overflow-hidden shadow-sm">
+        <div className="relative h-[180px] bg-white dark:bg-zinc-900">
+          <iframe
+            allow="clipboard-read; clipboard-write; fullscreen"
+            className="h-[180px] w-full border-0"
+            src={session.liveUrl}
+            title="Navegador en vivo"
+          />
+          {/* Agent ID badge overlaid bottom-right */}
+          <div className="absolute bottom-1.5 right-2">
+            <span className="text-[8px] font-mono text-zinc-300 dark:text-zinc-600 select-all">
+              {session.agentId}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-border/40 bg-background overflow-hidden shadow-sm">
@@ -152,11 +180,12 @@ function EmbeddedBrowser({ session }: { session: AgentSession }) {
         </button>
       </div>
 
-      {/* Browser viewport — mock content */}
+      {/* Browser viewport — same measure as the mock (180px) so the panel
+          never grows when the live browser iframe embeds. */}
       <div className="relative min-h-[180px] bg-white dark:bg-zinc-900 flex flex-col">
         {/* Loading skeleton or completed state */}
         {isRunning && (
-          <div className="flex flex-col gap-3 p-4">
+          <div className="flex flex-col gap-3 p-4 h-full justify-center">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-lg">{meta.favicon}</span>
               <span className="text-[11px] font-semibold text-zinc-800 dark:text-zinc-200 truncate">
@@ -195,6 +224,22 @@ function EmbeddedBrowser({ session }: { session: AgentSession }) {
               <div className="h-2 bg-zinc-100 dark:bg-zinc-800 rounded w-full" />
               <div className="h-2 bg-zinc-100 dark:bg-zinc-800 rounded w-4/5" />
               <div className="h-2 bg-zinc-100 dark:bg-zinc-800 rounded w-3/4" />
+            </div>
+          </div>
+        )}
+
+        {isError && (
+          <div className="flex flex-col items-center justify-center gap-3 p-6 h-full">
+            <div className="flex size-10 items-center justify-center rounded-full bg-destructive/10">
+              <CircleAlert className="size-5 text-destructive" />
+            </div>
+            <div className="text-center">
+              <p className="text-[12px] font-semibold text-zinc-800 dark:text-zinc-200">
+                {agent.errorConnection}
+              </p>
+              <p className="text-[10px] text-zinc-500 mt-0.5">
+                {agent.errorNotRun}
+              </p>
             </div>
           </div>
         )}
@@ -293,6 +338,16 @@ function SessionPanel({ session }: { session: AgentSession }) {
   const totalTasks = session.tasks.length;
   const isRunning = session.status === "running";
   const isCompleted = session.status === "completed";
+  const isError = session.status === "error";
+
+  // Live wall-clock for the session duration: ticks every second while the
+  // session runs so the "Tiempo" badge behaves like a real clock.
+  const nowMs = useLiveClock(isRunning);
+  const windowMs = session.windowMs ?? AGENT_SESSION_WINDOW_MS;
+  const elapsedMs = session.startedAt
+    ? (session.completedAt ?? nowMs) - session.startedAt
+    : 0;
+  const remainingMs = isRunning ? Math.max(0, windowMs - elapsedMs) : 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -306,12 +361,14 @@ function SessionPanel({ session }: { session: AgentSession }) {
           isRunning && "border-primary/20 bg-primary/5 text-primary",
           isCompleted &&
             "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+          isError && "border-destructive/30 bg-destructive/10 text-destructive",
           session.status === "idle" &&
             "border-border/30 bg-muted/30 text-muted-foreground"
         )}
       >
         {isRunning && <Loader2 className="size-3.5 animate-spin shrink-0" />}
         {isCompleted && <CheckCircle2 className="size-3.5 shrink-0" />}
+        {isError && <CircleAlert className="size-3.5 shrink-0" />}
         {session.status === "idle" && (
           <CircleDashed className="size-3.5 shrink-0" />
         )}
@@ -321,6 +378,24 @@ function SessionPanel({ session }: { session: AgentSession }) {
               completed: completedTasks,
               done: completedTasks === 1 ? "" : "s",
             })}
+          {isRunning && windowMs > 0 && (
+            <span className="opacity-80 font-normal">
+              {" "}
+              ·{" "}
+              {interpolate(agent.windowRemaining, {
+                remaining: formatClock(remainingMs),
+              })}
+            </span>
+          )}
+          {isError && (
+            <span>
+              {agent.errorConnection}
+              <span className="opacity-80 font-normal">
+                {" "}
+                · {agent.errorNotRun}
+              </span>
+            </span>
+          )}
           {isCompleted &&
             interpolate(agent.completedTasks, { total: totalTasks })}
           {session.status === "idle" && agent.waitingToStart}
@@ -337,7 +412,7 @@ function SessionPanel({ session }: { session: AgentSession }) {
         <MetricBadge
           icon={Clock}
           label={agent.time}
-          value={sessionElapsed(session)}
+          value={session.startedAt ? formatClock(elapsedMs) : "—"}
         />
         <MetricBadge
           icon={DollarSign}
@@ -419,6 +494,9 @@ export function AgentSidebar() {
               )}
               {session.status === "completed" && (
                 <CheckCircle2 className="size-3 text-emerald-500" />
+              )}
+              {session.status === "error" && (
+                <CircleAlert className="size-3 text-destructive" />
               )}
               {session.status === "idle" && <CircleDashed className="size-3" />}
               {session.toolName}

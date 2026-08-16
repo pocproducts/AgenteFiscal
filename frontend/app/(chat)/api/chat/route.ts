@@ -4,7 +4,12 @@ import {
   createUIMessageStreamResponse,
   generateId,
 } from "ai";
-import { BackendError, callBackend } from "@/lib/backend/client";
+import { AGENT_SESSION_WINDOW_MS } from "@/lib/agent-window";
+import {
+  BackendError,
+  callBackend,
+  callBackendStream,
+} from "@/lib/backend/client";
 import {
   getChatById,
   saveChat,
@@ -19,7 +24,7 @@ import { generateUUID } from "@/lib/utils";
 // Allow time for the real backend fiscal pipeline (ARCA WS calls, report
 // build) on top of the AI SDK stream overhead. The BFF call itself uses a
 // 60s timeout; this guards the whole serverless invocation.
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 // In-flight dedupe: the client (or a StrictMode double-effect / double click)
 // can fire the same launch request twice. A second execution of the identical
@@ -124,6 +129,24 @@ function describeBackendError(err: unknown): {
   }
   const detail = err instanceof Error ? err.message : String(err);
   return { code: "offline:chat", detail };
+}
+
+// ── Sistema Registral: real backend wiring (Route BFF) ───────────────────────────────
+// The BFF forwards the message to POST /v1/chat/message, which runs the real
+// Composio automation (agente_fiscal/api/routes/chat.py -> _handle_sistemaregistral)
+// and returns the registral data (incl. live_url) + a formatted markdown reply. We
+// map that into the agent-sidebar SSE events the UI already consumes.
+
+// Keep the live browser + agent monitor open for a full 10-minute window
+// (counted from command fire), even if Composio finishes the run earlier.
+// Single source of truth lives in `lib/agent-window.ts` — change the window
+// there and both this route and the streamed UI contract move together.
+
+function isRegistroRegistralCommand(text: string): boolean {
+  // Match the command token anywhere (CUIT may precede or follow it). The
+  // word boundary avoids triggering on a prose mention of "Sistema Registral"
+  // (which carries a space and is not the slash-command form).
+  return /\bsistemaregistral\b/i.test(text.trim());
 }
 
 async function persistAssistantMessage(chatId: string, text: string) {
@@ -274,35 +297,237 @@ export async function POST(request: Request) {
 
         let assistantText = "";
         try {
-          // The backend is the sole intent router: forward every message,
-          // even ones without a CUIT — it answers with its help/UNKNOWN reply.
-          const history = buildHistory(uiMessages as ClientUIMessage[]);
-          const res = await callBackend<ChatResponse>("/v1/chat/message", {
-            method: "POST",
-            body: {
-              message: userText,
-              conversation_id: id,
-              history: history.length ? history : null,
-              // The backend reports REQUIRE an active profile_id (400
-              // REPORT_PROFILE_REQUIRED otherwise). Forward what the client
-              // sent (camelCase → profile_id) and never drop it.
-              profile_id: activeProfileId ?? undefined,
-            },
-            timeoutMs: 60_000,
-          });
+          if (isRegistroRegistralCommand(userText)) {
+            // ── Sistema Registral: real backend wiring (Route BFF → /v1/chat/message) ──
+            // The backend runs the real Composio automation and returns the registral
+            // data (incl. live_url) + a formatted markdown reply. We map that into the
+            // agent-sidebar SSE events the UI already consumes.
+            const agentId = generateId();
 
-          assistantText = res.reply;
-          if (res.data && typeof res.data === "object") {
-            // Keep raw structured results visible for debugging.
-            assistantText += `\n\n<details><summary>Datos</summary>\n\n\`\`\`json\n${JSON.stringify(res.data, null, 2)}\n\`\`\`\n\n</details>`;
-          }
-
-          for (const chunk of chunkText(assistantText)) {
+            // 1) Open the agent monitor immediately (optimistic) so the sidebar
+            //    appears the instant the command fires, while Composio runs.
             dataStream.write({
-              type: "text-delta",
-              id: textPartId,
-              delta: chunk,
+              type: "data-agent-session-start",
+              data: {
+                agentId,
+                toolName: "SistemaRegistral",
+                toolKey: "sistemaregistral",
+                profileId: activeProfileId ?? undefined,
+                tasks: [],
+                // UI contract: how long the live session window lasts. The monitor
+                // clock and the "sesiones de agentes" table read this value, so a
+                // change in `lib/agent-window.ts` propagates everywhere at once.
+                windowMs: AGENT_SESSION_WINDOW_MS,
+              },
             });
+
+            // Window clock starts the moment the monitor opens.
+            const startedAt = Date.now();
+
+            // 2) Run the real backend automation via SSE so the LIVE browser URL
+            //    arrives mid-run (while the Composio session is still alive), not
+            //    after the ~3min run completes (when it would already be dead).
+            const history = buildHistory(uiMessages as ClientUIMessage[]);
+            try {
+              const streamRes = await callBackendStream(
+                "/v1/chat/message/stream",
+                {
+                  method: "POST",
+                  body: {
+                    message: userText,
+                    conversation_id: id,
+                    history: history.length ? history : null,
+                    profile_id: activeProfileId ?? undefined,
+                  },
+                  timeoutMs: 600_000,
+                }
+              );
+
+              if (!streamRes.body) {
+                throw new Error("Backend stream response has no body");
+              }
+              const reader = streamRes.body.getReader();
+              const decoder = new TextDecoder();
+              let buffer = "";
+              let finalReply = "";
+              let finalData: Record<string, unknown> | null = null;
+
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                  break;
+                }
+                buffer += decoder.decode(value, { stream: true });
+                let sep = buffer.indexOf("\n\n");
+                while (sep !== -1) {
+                  const frame = buffer.slice(0, sep);
+                  buffer = buffer.slice(sep + 2);
+
+                  let event = "message";
+                  let data = "";
+                  for (const line of frame.split("\n")) {
+                    if (line.startsWith("event:")) {
+                      event = line.slice(6).trim();
+                    } else if (line.startsWith("data:")) {
+                      data += line.slice(5).trim();
+                    }
+                  }
+
+                  if (event === "live_url") {
+                    // Forward the live browser URL the instant Composio provisions it.
+                    try {
+                      const parsed = JSON.parse(data) as { url?: string };
+                      if (parsed.url) {
+                        dataStream.write({
+                          type: "data-agent-session-liveurl",
+                          data: { agentId, liveUrl: parsed.url },
+                        });
+                      }
+                    } catch {
+                      // Ignore malformed live_url frame.
+                    }
+                  } else if (event === "agent_step") {
+                    try {
+                      const parsed = JSON.parse(data) as {
+                        step?: number;
+                        goal?: string;
+                        url?: string;
+                        status?: string;
+                      };
+                      if (typeof parsed.step === "number") {
+                        dataStream.write({
+                          type: "data-agent-browser-step",
+                          data: {
+                            agentId,
+                            step: parsed.step,
+                            goal: parsed.goal ?? "",
+                            url: parsed.url ?? "",
+                            status: parsed.status ?? "running",
+                          },
+                        });
+                      }
+                    } catch {
+                      // Ignore malformed agent_step frame.
+                    }
+                  } else if (event === "complete") {
+                    try {
+                      const parsed = JSON.parse(data) as {
+                        reply?: string;
+                        data?: Record<string, unknown> | null;
+                      };
+                      finalReply = parsed.reply ?? "";
+                      finalData = parsed.data ?? null;
+                    } catch {
+                      // Ignore malformed complete frame.
+                    }
+                  }
+                  // "conversation_start" / "progress" ignored: monitor is already
+                  // open optimistically and progress isn't surfaced here.
+                  sep = buffer.indexOf("\n\n");
+                }
+              }
+
+              // 3) Real reply from backend (formatted registral markdown) — finalize
+              //    the chat message immediately so the user can keep chatting.
+              assistantText = finalReply;
+              // A business error (e.g. BROWSER_ERROR) ships as `data.error` on
+              // the complete frame. The reply text is already short (see
+              // format_registro_response) and the raw detail must stay hidden,
+              // so skip the verbose <details> JSON dump for error responses.
+              const isError = Boolean(
+                finalData && typeof finalData === "object" && finalData.error
+              );
+              if (!isError && finalData && typeof finalData === "object") {
+                const { live_url: _omit, ...rest } = finalData as Record<
+                  string,
+                  unknown
+                >;
+                assistantText += `\n\n<details><summary>Datos</summary>\n\n\`\`\`json\n${JSON.stringify(rest, null, 2)}\n\`\`\`\n\n</details>`;
+              }
+              for (const chunk of chunkText(assistantText)) {
+                dataStream.write({
+                  type: "text-delta",
+                  id: textPartId,
+                  delta: chunk,
+                });
+              }
+              dataStream.write({ type: "text-end", id: textPartId });
+
+              if (isError) {
+                // Business failure: do NOT keep the 10-minute window open —
+                // close the session in an ERROR state immediately so the
+                // sidebar shows the error instead of a ticking clock.
+                dataStream.write({
+                  type: "data-agent-session-complete",
+                  data: { agentId, durationMs: 0, status: "error" },
+                });
+              } else {
+                // 4) Keep the live browser + monitor open for the full 10-minute
+                //    window (from command fire), even though Composio finished
+                //    earlier. Only then mark tasks completed + close the session.
+                const remainingMs = Math.max(
+                  0,
+                  AGENT_SESSION_WINDOW_MS - (Date.now() - startedAt)
+                );
+                if (remainingMs > 0) {
+                  await new Promise((resolve) =>
+                    setTimeout(resolve, remainingMs)
+                  );
+                }
+                dataStream.write({
+                  type: "data-agent-session-complete",
+                  data: { agentId, durationMs: 0 },
+                });
+              }
+            } catch (err) {
+              // Run failed (timeout / backend error). Close the monitor + finalize.
+              dataStream.write({
+                type: "data-agent-session-complete",
+                data: { agentId, durationMs: 0 },
+              });
+              const { detail } = describeBackendError(err);
+              assistantText = `No pude completar la consulta: ${detail}`;
+              for (const chunk of chunkText(assistantText)) {
+                dataStream.write({
+                  type: "text-delta",
+                  id: textPartId,
+                  delta: chunk,
+                });
+              }
+              dataStream.write({ type: "text-end", id: textPartId });
+            }
+          } else {
+            // The backend is the sole intent router: forward every message,
+            // even ones without a CUIT — it answers with its help/UNKNOWN reply.
+            const history = buildHistory(uiMessages as ClientUIMessage[]);
+            const res = await callBackend<ChatResponse>("/v1/chat/message", {
+              method: "POST",
+              body: {
+                message: userText,
+                conversation_id: id,
+                history: history.length ? history : null,
+                // The backend reports REQUIRE an active profile_id (400
+                // REPORT_PROFILE_REQUIRED otherwise). Forward what the client
+                // sent (camelCase → profile_id) and never drop it.
+                profile_id: activeProfileId ?? undefined,
+              },
+              timeoutMs: 60_000,
+            });
+
+            assistantText = res.reply;
+            if (res.data && typeof res.data === "object") {
+              // Keep raw structured results visible for debugging.
+              assistantText += `\n\n<details><summary>Datos</summary>\n\n\`\`\`json\n${JSON.stringify(res.data, null, 2)}\n\`\`\`\n\n</details>`;
+            }
+
+            for (const chunk of chunkText(assistantText)) {
+              dataStream.write({
+                type: "text-delta",
+                id: textPartId,
+                delta: chunk,
+              });
+            }
+            dataStream.write({ type: "text-end", id: textPartId });
           }
         } catch (err) {
           const { code, detail } = describeBackendError(err);
@@ -313,9 +538,8 @@ export async function POST(request: Request) {
             id: textPartId,
             delta: assistantText,
           });
-        } finally {
           dataStream.write({ type: "text-end", id: textPartId });
-
+        } finally {
           if (uiMessages.length === 1) {
             const now = new Date();
             const day = now.getDate().toString().padStart(2, "0");

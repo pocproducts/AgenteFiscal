@@ -102,3 +102,59 @@ export async function callBackend<T>(
     clearTimeout(timeout);
   }
 }
+
+/**
+ * Streaming variant of {@link callBackend}: returns the raw `Response` (with a
+ * long-lived body stream) instead of parsing JSON. Use for SSE endpoints such
+ * as `/v1/chat/message/stream`. The caller is responsible for reading and
+ * parsing the event stream. The abort timeout stays armed for the whole call
+ * as a safety cap (default 280s).
+ */
+export async function callBackendStream(
+  path: string,
+  init: CallBackendInit = {}
+): Promise<Response> {
+  const { userId, getToken } = await auth();
+  if (!userId) {
+    throw new BackendError("unauthenticated", 401);
+  }
+  const token = await getToken();
+  if (!token) {
+    throw new BackendError("no session token", 401);
+  }
+
+  const { method = "GET", body, timeoutMs = 280_000 } = init;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+  };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(`${backendBaseUrl}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      clearTimeout(timeout);
+      throw await toBackendError(res);
+    }
+    return res;
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err instanceof BackendError) {
+      throw err;
+    }
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new BackendError("backend timeout", 504);
+    }
+    throw new BackendError((err as Error).message, 502);
+  }
+}

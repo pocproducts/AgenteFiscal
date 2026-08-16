@@ -1,6 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useSyncExternalStore,
+  useState,
+} from "react";
 import useSWR from "swr";
 import { useTenantKey } from "@/hooks/use-tenant-key";
 import type {
@@ -158,12 +163,25 @@ export function useProfiles() {
   );
   const profiles = data ?? [];
 
-  const activeProfileId = useSyncExternalStore(
+  // Snapshot del store SIEMPRE estable (el cache de localStorage). El gate de
+  // montaje de abajo evita exponer el valor real en el primer render del
+  // cliente, que es lo que rompía la hidratación (server: "" vs cliente:
+  // valor de localStorage) en componentes como AgentComposer.
+  const activeProfileIdRaw = useSyncExternalStore(
     subscribeActiveProfile,
     () => activeProfileIdCache,
-    () => "" // SSR: nunca hay localStorage en el server; el post-hydration
-    // useEffect reconcilia con el valor real.
+    () => "" // SSR: nunca hay localStorage en el server.
   );
+
+  // Post-hydration: recién después de montar se devuelve el valor real de
+  // localStorage. El servidor y el primer render del cliente devuelven ""
+  // (idénticos), así la hidratación no difiere en consumers (p.ej. el
+  // `disabled={!canRun}` de AgentComposer).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+  const activeProfileId = mounted ? activeProfileIdRaw : "";
 
   const setActiveProfileId = useCallback((id: string) => {
     writeStoredActiveProfileId(id);

@@ -405,6 +405,9 @@ export const translations = {
           message: "Message",
           queryCompleted: "Consulta completada",
           waitingStart: "Esperando inicio...",
+          windowRemaining: "window remaining: {remaining}",
+          errorConnection: "Connection error",
+          errorNotRun: "It did not run",
         },
       },
       agentLaunch: {
@@ -418,8 +421,7 @@ export const translations = {
         run: "Run",
         cancel: "Cancel",
         newProfile: "New profile",
-        selectProfileHint:
-          "Select a profile to enable the report actions",
+        selectProfileHint: "Select a profile to enable the report actions",
       },
       billingWidgets: {
         tokensLabel: "Tokens",
@@ -1295,6 +1297,9 @@ export const translations = {
           message: "Mensaje",
           queryCompleted: "Consulta completada",
           waitingStart: "Esperando inicio...",
+          windowRemaining: "Ventana restante: {remaining}",
+          errorConnection: "Error de conexión",
+          errorNotRun: "No se ejecutó",
         },
       },
       agentLaunch: {
@@ -1762,7 +1767,8 @@ export const translations = {
             noDomains: "Sin dominios almacenados",
             createdOn: "Creado el",
             editDialogTitle: "Editar perfil",
-            editDialogDesc: "Actualiza el nombre, el CUIT o el estado de este perfil.",
+            editDialogDesc:
+              "Actualiza el nombre, el CUIT o el estado de este perfil.",
             cuitOptionalHint:
               "Opcional — dejalo vacío para crear el perfil sin CUIT.",
             statusLabel: "Estado",

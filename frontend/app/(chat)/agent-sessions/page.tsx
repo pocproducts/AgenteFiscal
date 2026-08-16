@@ -3,7 +3,9 @@
 import { Activity, Clock, Cpu, Tag, Target, UserIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useAgentSidebar } from "@/hooks/use-agent-sidebar";
+import { useLiveClock } from "@/hooks/use-live-clock";
 import { useProfiles } from "@/hooks/use-profiles";
+import { formatClock } from "@/lib/agent-window";
 import { useLanguage } from "@/lib/i18n";
 
 export default function AgentSessionsPage() {
@@ -15,6 +17,11 @@ export default function AgentSessionsPage() {
   const sortedSessions = [...allSessions].sort(
     (a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0)
   );
+
+  // Live wall-clock: the duration column ticks in real time while any session
+  // is running, matching the chat sidebar clock.
+  const anyRunning = sortedSessions.some((s) => s.status === "running");
+  const nowMs = useLiveClock(anyRunning);
 
   // Helper to find profile name of a session
   const getProfileName = (profileId?: string) => {
@@ -109,12 +116,9 @@ export default function AgentSessionsPage() {
             <tbody className="divide-y divide-border/40">
               {sortedSessions.map((s, i) => {
                 const totalCostUsd = s.totalCostCents / 100;
-                const duration =
-                  s.startedAt && s.completedAt
-                    ? `${((s.completedAt - s.startedAt) / 1000).toFixed(1)}s`
-                    : s.startedAt
-                      ? dict.running
-                      : "—";
+                const duration = s.startedAt
+                  ? formatClock((s.completedAt ?? nowMs) - s.startedAt)
+                  : "—";
 
                 const startedString = s.startedAt
                   ? new Date(s.startedAt).toLocaleString()

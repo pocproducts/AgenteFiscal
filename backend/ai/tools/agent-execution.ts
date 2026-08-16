@@ -25,6 +25,8 @@ export interface AgentSessionSnapshot {
   startedAt?: number;
   completedAt?: number;
   totalCostCents: number;
+  /** Contract window (ms) the live agent session stays open after fire. */
+  windowMs?: number;
 }
 
 export interface AgentSession {
@@ -44,6 +46,11 @@ export interface AgentSession {
   completedAt?: number;
   /** Sum of task costs */
   totalCostCents: number;
+  /** Live Composio browser URL to embed (Sistema Registral) */
+  liveUrl?: string;
+  /** Contract window (ms) the live session stays open — advertised on
+   *  session-start from `lib/agent-window.ts` (single source of truth). */
+  windowMs?: number;
 }
 
 // ─── Sub-task templates per fiscal tool ───────────────────────────────────────
@@ -56,13 +63,10 @@ const SUBTASK_TEMPLATES: Record<string, string[]> = {
     "Validating response schema",
     "Formatting output",
   ],
-  sistemaregistral: [
-    "Authenticating with Registro Registral",
-    "Querying entity legal form",
-    "Fetching registered activities",
-    "Retrieving fiscal address",
-    "Formatting output",
-  ],
+  // `sistemaregistral` removed: the live streaming flow (`app/(chat)/api/chat/route.ts`)
+  // opens its sessions with `tasks: []` and streams real steps via
+  // `data-agent-browser-step`, so the static template was dead weight. Any
+  // residual "old button" click falls back to DEFAULT_SUBTASKS.
   misfacilidades: [
     "Connecting to Mis Facilidades",
     "Fetching active payment plans",

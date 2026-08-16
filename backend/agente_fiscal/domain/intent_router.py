@@ -22,6 +22,7 @@ class Intent(Enum):
 	UNKNOWN = 0
 	TAXPAYER_QUERY = 1
 	REPORTE_COMPLETO = 2
+	SISTEMA_REGISTRAL = 3
 
 
 # CUIT: 11 dígitos, opcionalmente con guiones (XX-XXXXXXXX-X)
@@ -41,6 +42,10 @@ def detect(message: str) -> tuple[Intent, str | None, dict]:
 	cuit = match.group(1).replace('-', '') if match else None
 
 	msg = message.lower()
+
+	# ── Sistema Registral (extracción real vía ComposioBrowser) ──────────────────
+	if cuit and any(kw in msg for kw in ['sistemaregistral', 'sistema registral', 'registro registral']):
+		return Intent.SISTEMA_REGISTRAL, cuit, {}
 
 	# ── Reporte completo (pipeline completo: padrón + calendario + browser + PDF) ─
 	if cuit and any(kw in msg for kw in ['reporte', 'informe', 'completo', 'todo', 'resumen', 'full', 'pipeline']):

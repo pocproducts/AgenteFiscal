@@ -63,11 +63,12 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, UUID4
+from pydantic import BaseModel, ConfigDict, Field
+from uuid import UUID
 
 from agente_fiscal.api.profile_gate import ActiveProfileContext, validate_active_profile
 from agente_fiscal.api.store import RedisStore
@@ -101,9 +102,9 @@ class WizardRequest(BaseModel):
 	tasks: WizardTasks | None = Field(default=None, description='Tareas seleccionadas (null → solo descubrir cliente)')
 	send_email: bool = Field(default=False, description='Enviar reporte por email al cliente')
 	conversation_id: str | None = Field(default=None, description='Identificador de conversación (se genera si se omite)')
-	profile_id: UUID4 | None = Field(
+	profile_id: UUID | None = Field(
 		default=None,
-		description='Perfil ACTIVO del tenant que genera el reporte (obligatorio para ejecutar el pipeline)',
+		description='Opaque conversation identifier (generated if omitted)',
 	)
 
 
@@ -130,7 +131,7 @@ class ChatRequest(BaseModel):
 		default=None,
 		description='Previous messages: [{"role": "user"|"assistant", "content": str}]',
 	)
-	profile_id: UUID4 | None = Field(
+	profile_id: UUID | None = Field(
 		default=None,
 		description='Active tenant profile required to generate a report (REPORTE_COMPLETO intent)',
 	)
@@ -158,7 +159,7 @@ class ChatResponse(BaseModel):
 
 async def _resolve_active_profile(
 	fastapi_request: Request,
-	profile_id: UUID4 | None,
+	profile_id: UUID | None,
 ) -> ActiveProfileContext | None:
 	"""Validate the active-profile invariant for a chat report request.
 
@@ -247,7 +248,12 @@ async def _persist_chat_report_run(
 
 
 def _handle_taxpayer(cuit: str) -> dict[str, Any] | None:
-	"""Consult taxpayer data via ARCA WS API (sync)."""
+	"""Consult taxpayer data via ARCA WS API (sync).
+
+	Devuelve el dict completo del padrón (``PadronA5Result.to_dict()``) para
+	que la UI pueda mostrar la información íntegra del contribuyente, incluido
+	el detalle de ``errorConstancia`` cuando la persona no existe o está dada de baja.
+	"""
 	from agente_fiscal.api.deps import REPRESENTANTE_CUIT, get_ta
 	from agente_fiscal.adapters.arca_ws import consultar_cuit
 
@@ -257,15 +263,7 @@ def _handle_taxpayer(cuit: str) -> dict[str, Any] | None:
 
 	try:
 		result = consultar_cuit(cuit, token, sign, REPRESENTANTE_CUIT)
-		output = result.to_output()
-		if output.errorConstancia:
-			return {'error': '; '.join(output.errorConstancia.error)}
-		output_dict = result.to_dict()
-		return {
-			'nombre': output_dict.get('nombre') or (output.datosGenerales.razonSocial if output.datosGenerales else ''),
-			'tipo': output_dict.get('tipo', ''),
-			'tipo_persona': output_dict.get('tipo_persona', ''),
-		}
+		return result.to_dict()
 	except Exception as exc:
 		return {'error': str(exc)}
 
@@ -340,6 +338,121 @@ def _handle_reporte(cuit: str) -> dict[str, Any] | None:
 		return resultado
 	except Exception as exc:
 		return {'error': str(exc)}
+
+
+def _handle_sistemaregistral(
+	cuit: str,
+	echo_func: Optional[Callable[[str], None]] = None,
+	on_live_url: Optional[Callable[[str], None]] = None,
+	on_step: Optional[Callable[[int, str, str, str], None]] = None,
+) -> dict[str, Any] | None:
+	"""Extrae el registro tributario real (Sistema Registral ARCA) vía ComposioBrowser.
+
+	Reemplaza el stub TS `ejecutarSistemaRegistral`. Corre RegistroTask con el
+	CUIT del cliente y devuelve el RegistroOutput coherente con el CUIT.
+
+	``on_live_url`` se invoca en cuanto Composio provisiona la sesión de browser
+	(viva), para que el frontend pueda embeberla mientras la automatización corre.
+	"""
+	from agente_fiscal.api.deps import REPRESENTANTE_CUIT, get_ta
+	from agente_fiscal.adapters.browser import ComposioBrowser
+	from agente_fiscal.adapters.browser.factory import build_browser_tasks
+	from agente_fiscal.config import get_settings
+	from agente_fiscal.domain.models import ClientConfig
+	from agente_fiscal.features import integration_enabled
+
+	token, sign = get_ta()
+	if not token or not sign:
+		return None
+
+	creds = get_settings().credentials
+	if not creds.composio_api_key or not creds.clave_fiscal:
+		return {
+			'error': 'COMPOSIO_KEY_MISSING',
+			'detail': 'Falta COMPOSIO_API_KEY o ESTUDIO_CLAVE_FISCAL en .env para usar Sistema Registral.',
+		}
+	if not integration_enabled('browser'):
+		return {
+			'error': 'INTEGRATION_DISABLED',
+			'detail': 'La integración de browser (Composio) está deshabilitada (BROWSER_ENABLED=false).',
+		}
+
+	browser = ComposioBrowser(
+		composio_api_key=creds.composio_api_key,
+		estudio_cuit=REPRESENTANTE_CUIT,
+		estudio_clave=creds.clave_fiscal,
+	)
+	try:
+		tasks = build_browser_tasks(
+			cuit=REPRESENTANTE_CUIT,
+			clave=creds.clave_fiscal,
+			cliente_cuit=cuit,
+			with_registro=True,
+		)
+		out = browser.run_single(
+			ClientConfig(cuit=cuit),
+			tasks=tasks,
+			echo_func=echo_func,
+			on_live_url=on_live_url,
+			on_step=on_step,
+		)
+	except Exception as exc:
+		return {'error': 'BROWSER_ERROR', 'detail': str(exc)}
+
+	if out.error:
+		return {'error': 'BROWSER_ERROR', 'detail': out.error, 'live_url': out.live_url}
+	return out.model_dump()
+
+
+def format_registro_response(data: dict[str, Any] | None, cuit: str) -> str:
+	"""Formatea el RegistroOutput del Sistema Registral en markdown coherente al CUIT."""
+	if not data or data.get('error'):
+		err = (data or {}).get('error')
+		# Composio connection failures (HTTP 403 / BROWSER_ERROR) map to a short,
+		# user-friendly reason instead of leaking the raw Composio traceback.
+		if err == 'BROWSER_ERROR':
+			return (
+				f'No pude consultar el Sistema Registral para el CUIT {cuit}.\n\n'
+				'**Motivo:** Error de conexión'
+			)
+		detail = (data or {}).get('detail') or 'Error desconocido'
+		return (
+			f'No pude consultar el Sistema Registral para el CUIT {cuit}.\n\n'
+			f'**Motivo:** `{err}` — {detail}'
+		)
+	registro = data.get('registro') or {}
+	jurisdiccion = registro.get('jurisdiccion')
+	domicilios = registro.get('domicilios') or []
+	actividades = registro.get('actividades') or []
+	impuestos = registro.get('impuestos') or []
+	puntos = registro.get('puntos_de_venta') or []
+
+	lines = [f'**Sistema Registral (ARCA)** — CUIT {cuit}', '']
+	if jurisdiccion:
+		lines.append(f'- **Jurisdicción:** {jurisdiccion}')
+	if domicilios:
+		lines.append('- **Domicilios:**')
+		for d in domicilios[:3]:
+			calle = d.get('calle') or d.get('direccion') or ''
+			loc = d.get('localidad') or d.get('provincia') or ''
+			lines.append(f'  - {calle} — {loc}'.strip())
+	if actividades:
+		lines.append('- **Actividades:**')
+		for a in actividades[:5]:
+			cod = a.get('codigo', '')
+			desc = a.get('descripcion', '')
+			lines.append(f'  - `{cod}` {desc}'.strip())
+	if impuestos:
+		lines.append('- **Impuestos inscriptos:**')
+		for i in impuestos[:8]:
+			cod = i.get('codigo', '')
+			desc = i.get('descripcion', '')
+			lines.append(f'  - `{cod}` {desc}'.strip())
+	if puntos:
+		lines.append(f'- **Puntos de venta:** {len(puntos)}')
+	lines.append('')
+	lines.append('_Datos obtenidos del Sistema Registral ARCA en vivo (CUIT coherente)._')
+	return '\n'.join(lines)
 
 
 # ── Streaming handler (accepts echo_func for progress) ───────────────────
@@ -807,6 +920,78 @@ async def chat_message_stream(
 			headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
 		)
 
+	if intent == Intent.SISTEMA_REGISTRAL:
+		# ── Streaming for Sistema Registral ──────────────────────────────
+		# Emits `live_url` as soon as Composio provisions the browser session
+		# (mid-run) so the UI can embed the LIVE browser, plus `complete` with
+		# the registral result. Reuses the same SSE framing as REPORTE_COMPLETO.
+		queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+		_loop = asyncio.get_running_loop()
+		_progress_messages: list[str] = []
+
+		def _progress(msg: str) -> None:
+			_progress_messages.append(msg)
+			_loop.call_soon_threadsafe(queue.put_nowait, ('progress', msg))
+
+		def _on_live_url(url: str) -> None:
+			_loop.call_soon_threadsafe(queue.put_nowait, ('live_url', url))
+
+		def _on_step(step, goal, url, status='running'):
+			_loop.call_soon_threadsafe(queue.put_nowait, ('agent_step', {'step': step, 'goal': goal, 'url': url, 'status': status}))
+
+		async def _run_sr():
+			try:
+				data = await asyncio.to_thread(_handle_sistemaregistral, cuit, _progress, _on_live_url, _on_step)
+				reply = format_registro_response(data, cuit)
+				safe_data: dict[str, Any] | None = None
+				if data:
+					safe_data = {}
+					for k, v in data.items():
+						safe_data[k] = str(v) if not isinstance(v, (str, int, float, bool, list, dict, type(None))) else v
+				if tenant_id and store is not None:
+					assistant_entry: dict[str, Any] = {'role': 'assistant', 'content': reply}
+					if _progress_messages:
+						assistant_entry['pipeline_steps'] = list(_progress_messages)
+					await store.append_messages(
+						tenant_id,
+						conversation_id,
+						[
+							{'role': 'user', 'content': message},
+							assistant_entry,
+						],
+					)
+				complete_payload: dict[str, Any] = {'reply': reply, 'data': safe_data, 'conversation_id': conversation_id}
+				await queue.put(('complete', complete_payload))
+			except Exception as exc:
+				await queue.put(
+					(
+						'complete',
+						{'reply': f'Ocurrió un error al consultar Sistema Registral: {exc}', 'data': None, 'conversation_id': conversation_id},
+					)
+				)
+
+		async def _generate_sr():
+			yield f'event: conversation_start\ndata: {json.dumps({"conversation_id": conversation_id})}\n\n'
+			task = asyncio.create_task(_run_sr())
+			while True:
+				event_type, payload = await queue.get()
+				if event_type == 'progress':
+					yield f'event: progress\ndata: {json.dumps({"message": payload})}\n\n'
+				elif event_type == 'live_url':
+					yield f'event: live_url\ndata: {json.dumps({"url": payload})}\n\n'
+				elif event_type == 'agent_step':
+					yield f'event: agent_step\ndata: {json.dumps(payload)}\n\n'
+				elif event_type == 'complete':
+					yield f'event: complete\ndata: {json.dumps(payload)}\n\n'
+					break
+			await task
+
+		return StreamingResponse(
+			_generate_sr(),
+			media_type='text/event-stream',
+			headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'},
+		)
+
 	if intent != Intent.REPORTE_COMPLETO:
 		reply = 'Intento no soportado.'
 		if tenant_id and store is not None:
@@ -926,6 +1111,7 @@ def _iter_sse_early(conversation_id: str, reply: str):
 _ACTION_NAMES: dict[Intent, str] = {
 	Intent.TAXPAYER_QUERY: 'consultar_cuit',
 	Intent.REPORTE_COMPLETO: 'generar_reporte',
+	Intent.SISTEMA_REGISTRAL: 'sistemaregistral',
 }
 
 
@@ -1035,6 +1221,9 @@ async def chat_message(
 				if report_run_id and isinstance(data, dict):
 					data['report_run_id'] = report_run_id
 			reply = format_reporte_response(data, cuit)
+		elif intent == Intent.SISTEMA_REGISTRAL:
+			data = await asyncio.to_thread(_handle_sistemaregistral, cuit)
+			reply = format_registro_response(data, cuit)
 		else:
 			data = None
 			reply = 'Intento no soportado.'
