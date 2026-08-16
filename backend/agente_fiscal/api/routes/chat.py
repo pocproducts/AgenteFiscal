@@ -414,7 +414,8 @@ def _run_browser_tool(
 
 	if out.error:
 		return {'error': 'BROWSER_ERROR', 'detail': out.error, 'live_url': out.live_url}
-	return out.model_dump()
+	# mode='json': date/Decimal → ISO/float, seguro para el framing SSE.
+	return out.model_dump(mode='json')
 
 
 def _run_engine_tool(
@@ -1073,13 +1074,17 @@ async def chat_message_stream(
 						],
 					)
 				complete_payload: dict[str, Any] = {'reply': reply, 'data': safe_data, 'conversation_id': conversation_id}
-				await queue.put(('complete', complete_payload))
+				# Mismo canal FIFO que progress/live_url/agent_step (call_soon_threadsafe):
+				# si el hilo del worker dejó progresos en cola, el loop los drena
+				# ANTES del complete (ver race fix en test_chat_stream 6.1).
+				_loop.call_soon_threadsafe(queue.put_nowait, ('complete', complete_payload))
 			except Exception as exc:
-				await queue.put(
+				_loop.call_soon_threadsafe(
+					queue.put_nowait,
 					(
 						'complete',
 						{'reply': f'Ocurrió un error al consultar {spec.tool_name}: {exc}', 'data': None, 'conversation_id': conversation_id},
-					)
+					),
 				)
 
 		async def _generate_tool():
