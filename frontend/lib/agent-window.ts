@@ -15,6 +15,43 @@
 
 export const AGENT_SESSION_WINDOW_MS = 10 * 60_000;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Browser tools: single source for the BFF tool-key matcher, the display
+// toolName (PascalCase) and the per-tool session window.
+//
+// Window rule (design D3): window_ms >= task timeout + margin, so the UI never
+// closes before the backend finishes:
+//   - browser tools: FacilidadesTask 900s → 960s (16m); RegistroTask /
+//     VencimientosDeudasTask / IIBBTask 600s → 660s (11m).
+//   - deterministic engines (consultaarca / calendariovencimientosarca): no
+//     browser session; short 120s window, they just need to show output.
+// Windows live ONLY here (backend ToolSpec carries no window_ms).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Matches the six browser-tool keys anywhere in a direct command. */
+export const TOOL_KEY_RE =
+  /\b(?:deudavencimientos|misfacilidades|rentascordoba|sistemaregistral|consultaarca|calendariovencimientosarca)\b/i;
+
+/** PascalCase display name per tool key (`data-agent-session-start.toolName`). */
+export const TOOL_NAMES: Record<string, string> = {
+  sistemaregistral: "SistemaRegistral",
+  deudavencimientos: "DeudaVencimientos",
+  misfacilidades: "MisFacilidades",
+  rentascordoba: "RentasCordoba",
+  consultaarca: "ConsultaArca",
+  calendariovencimientosarca: "CalendarioVencimientosArca",
+};
+
+/** Per-tool session window (ms); overrides the default for every tool key. */
+export const TOOL_WINDOW_OVERRIDES: Record<string, number> = {
+  sistemaregistral: 11 * 60_000, // 660s ≥ RegistroTask 600s + margin
+  deudavencimientos: 11 * 60_000, // 660s ≥ VencimientosDeudasTask 600s + margin
+  misfacilidades: 16 * 60_000, // 960s ≥ FacilidadesTask 900s + margin
+  rentascordoba: 11 * 60_000, // 660s ≥ IIBBTask 600s + margin
+  consultaarca: 2 * 60_000, // deterministic engine (no browser)
+  calendariovencimientosarca: 2 * 60_000, // deterministic engine (no browser)
+};
+
 /** Formats a duration as a wall clock (`mm:ss`; `h:mm:ss` when ≥ 1h). */
 export function formatClock(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) {

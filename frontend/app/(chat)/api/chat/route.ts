@@ -4,7 +4,12 @@ import {
   createUIMessageStreamResponse,
   generateId,
 } from "ai";
-import { AGENT_SESSION_WINDOW_MS } from "@/lib/agent-window";
+import {
+  AGENT_SESSION_WINDOW_MS,
+  TOOL_KEY_RE,
+  TOOL_NAMES,
+  TOOL_WINDOW_OVERRIDES,
+} from "@/lib/agent-window";
 import {
   BackendError,
   callBackend,
@@ -131,23 +136,17 @@ function describeBackendError(err: unknown): {
   return { code: "offline:chat", detail };
 }
 
-// ── Sistema Registral: real backend wiring (Route BFF) ───────────────────────────────
+// ── Browser tools: real backend wiring (Route BFF) ────────────────────────────
 // The BFF forwards the message to POST /v1/chat/message, which runs the real
-// Composio automation (agente_fiscal/api/routes/chat.py -> _handle_sistemaregistral)
-// and returns the registral data (incl. live_url) + a formatted markdown reply. We
-// map that into the agent-sidebar SSE events the UI already consumes.
+// backend automation (agente_fiscal/api/routes/chat.py -> ToolSpec dispatch:
+// ComposioBrowser for browser tools, padrón A5 / rules engine for deterministic
+// ones) and returns the tool data (incl. live_url) + a formatted markdown
+// reply. We map that into the agent-sidebar SSE events the UI already consumes.
 
-// Keep the live browser + agent monitor open for a full 10-minute window
-// (counted from command fire), even if Composio finishes the run earlier.
-// Single source of truth lives in `lib/agent-window.ts` — change the window
-// there and both this route and the streamed UI contract move together.
-
-function isRegistroRegistralCommand(text: string): boolean {
-  // Match the command token anywhere (CUIT may precede or follow it). The
-  // word boundary avoids triggering on a prose mention of "Sistema Registral"
-  // (which carries a space and is not the slash-command form).
-  return /\bsistemaregistral\b/i.test(text.trim());
-}
+// Keep the live browser + agent monitor open for the tool's window (counted
+// from command fire), even if the backend finishes the run earlier. Single
+// source of truth lives in `lib/agent-window.ts` — change the window there and
+// both this route and the streamed UI contract move together.
 
 async function persistAssistantMessage(chatId: string, text: string) {
   if (!text) {
@@ -297,27 +296,40 @@ export async function POST(request: Request) {
 
         let assistantText = "";
         try {
-          if (isRegistroRegistralCommand(userText)) {
-            // ── Sistema Registral: real backend wiring (Route BFF → /v1/chat/message) ──
-            // The backend runs the real Composio automation and returns the registral
-            // data (incl. live_url) + a formatted markdown reply. We map that into the
+          // Browser tools: resolve toolKey/toolName/windowMs from the matcher
+          // (single source: lib/agent-window.ts). Non-tool messages go through
+          // the generic backend chat path below.
+          const toolMatch = userText.match(TOOL_KEY_RE);
+          const toolKey = toolMatch ? toolMatch[0].toLowerCase() : null;
+          const isToolCommand = Boolean(toolKey && TOOL_NAMES[toolKey]);
+
+          // Tool window (used in session-start AND the remaining-window wait).
+          const windowMs =
+            TOOL_WINDOW_OVERRIDES[toolKey ?? ""] ?? AGENT_SESSION_WINDOW_MS;
+
+          if (isToolCommand && toolKey) {
+            // ── Browser tool: real backend wiring (Route BFF → /v1/chat/message/stream) ──
+            // The backend runs the real automation (ComposioBrowser o motor
+            // determinista según ToolSpec) and returns the tool data (incl.
+            // live_url) + a formatted markdown reply. We map that into the
             // agent-sidebar SSE events the UI already consumes.
             const agentId = generateId();
+            const toolName = TOOL_NAMES[toolKey];
 
             // 1) Open the agent monitor immediately (optimistic) so the sidebar
-            //    appears the instant the command fires, while Composio runs.
+            //    appears the instant the command fires, while the backend runs.
             dataStream.write({
               type: "data-agent-session-start",
               data: {
                 agentId,
-                toolName: "SistemaRegistral",
-                toolKey: "sistemaregistral",
+                toolName,
+                toolKey,
                 profileId: activeProfileId ?? undefined,
                 tasks: [],
                 // UI contract: how long the live session window lasts. The monitor
                 // clock and the "sesiones de agentes" table read this value, so a
                 // change in `lib/agent-window.ts` propagates everywhere at once.
-                windowMs: AGENT_SESSION_WINDOW_MS,
+                windowMs,
               },
             });
 
@@ -462,12 +474,12 @@ export async function POST(request: Request) {
                   data: { agentId, durationMs: 0, status: "error" },
                 });
               } else {
-                // 4) Keep the live browser + monitor open for the full 10-minute
-                //    window (from command fire), even though Composio finished
-                //    earlier. Only then mark tasks completed + close the session.
+                // Keep the live browser + monitor open for the tool's window
+                // (from command fire), even though the backend finished
+                // earlier. Only then mark tasks completed + close the session.
                 const remainingMs = Math.max(
                   0,
-                  AGENT_SESSION_WINDOW_MS - (Date.now() - startedAt)
+                  windowMs - (Date.now() - startedAt)
                 );
                 if (remainingMs > 0) {
                   await new Promise((resolve) =>
