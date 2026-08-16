@@ -241,3 +241,279 @@ def format_registro(registro: Optional[RegistroOutput], cuit: str) -> str:
 		lines.append('')
 
 	return '\n'.join(lines)
+
+
+# ─── Browser tools: formatters por tool ─────────────────────────────────────
+# Cada ``format_<tool>_response(data, cuit)`` recibe el dict plano del handler
+# (``DeudaOutput.model_dump()`` para Phase-1; output de motor para Phase-2) y
+# devuelve markdown en español. Rama de error primero (BROWSER_ERROR → motivo
+# corto; códigos de motor → `{code}` — detail), luego secciones sobre los keys
+# existentes. Estilo espejo de ``format_registro_response`` (chat.py).
+
+
+def _error_reply(data: dict[str, Any] | None, cuit: str, tool_label: str) -> str | None:
+	"""Devuelve la respuesta corta de error si no hay datos o vienen con error."""
+	if data is None:
+		# El handler no devolvió nada (p.ej. sin credenciales/token ARCA).
+		return f'No pude consultar {tool_label} para el CUIT {cuit}.\n\n**Motivo:** No se obtuvo respuesta del backend'
+	if not data.get('error'):
+		return None
+	err = data.get('error')
+	label = f'No pude consultar {tool_label} para el CUIT {cuit}.'
+	if err == 'BROWSER_ERROR':
+		return f'{label}\n\n**Motivo:** Error de conexión'
+	detail = data.get('detail') or 'Error desconocido'
+	return f'{label}\n\n**Motivo:** `{err}` — {detail}'
+
+
+def _bullet(items: list[str]) -> str:
+	"""Une items no vacíos como lista de markdown (``- item``)."""
+	return '\n'.join(f'- {i}' for i in items if i and str(i).strip())
+
+
+def format_deuda_response(data: dict[str, Any] | None, cuit: str) -> str:
+	"""Formatea deuda y vencimientos (ctacte.cloud) del DeudaOutput."""
+	error = _error_reply(data, cuit, 'la deuda')
+	if error:
+		return error
+
+	lines = [f'**Deuda y vencimientos (ARCA)** — CUIT {cuit}', '']
+
+	deuda_actual = (data or {}).get('deuda_actual')
+	if isinstance(deuda_actual, (int, float)) and deuda_actual >= 0:
+		lines.append(f'- **Deuda actual:** $ {deuda_actual:,.2f}')
+
+	vencimientos = (data or {}).get('vencimientos') or []
+	if vencimientos:
+		lines.append('- **Vencimientos:**')
+		for v in vencimientos[:10]:
+			detalle = ' — '.join(
+				str(x)
+				for x in [
+					v.get('impuesto') or '',
+					v.get('concepto') or '',
+					(v.get('periodo') or ''),
+					f"vence {v.get('fecha_vencimiento')}" if v.get('fecha_vencimiento') else '',
+				]
+				if str(x).strip()
+			)
+			lines.append(f'  - {detalle}')
+
+	deudas = (data or {}).get('deudas') or []
+	if deudas:
+		lines.append('- **Deudas en mora:**')
+		for d in deudas[:10]:
+			saldo = d.get('saldo') or 0.0
+			detalle = ' — '.join(
+				str(x)
+				for x in [
+					d.get('impuesto') or '',
+					d.get('concepto') or '',
+					f'$ {saldo:,.2f}',
+					f"vence {d.get('vencimiento')}" if d.get('vencimiento') else '',
+				]
+				if str(x).strip()
+			)
+			lines.append(f'  - {detalle}')
+
+	if not (isinstance(deuda_actual, (int, float)) or vencimientos or deudas):
+		lines.append('No se encontraron deudas o vencimientos activos.')
+
+	lines.append('')
+	lines.append('_Datos obtenidos de AFIP en vivo (CUIT coherente)._')
+	return '\n'.join(lines)
+
+
+def format_facilidades_response(data: dict[str, Any] | None, cuit: str) -> str:
+	"""Formatea los planes de Mis Facilidades del DeudaOutput."""
+	error = _error_reply(data, cuit, 'Mis Facilidades')
+	if error:
+		return error
+
+	facilidades = (data or {}).get('facilidades') or []
+	lines = [f'**Mis Facilidades (ARCA)** — CUIT {cuit}', '']
+
+	for plan in facilidades[:10]:
+		nombre = plan.get('plan') or 'Plan'
+		nro = plan.get('nro_plan')
+		estado = plan.get('estado') or ''
+		header = f'- **{nombre}**' + (f' (N° {nro})' if nro else '')
+		if estado:
+			header += f' — {estado}'
+		lines.append(header)
+		detalles: list[str] = []
+		if plan.get('cantidad_cuotas'):
+			detalles.append(f'{plan["cantidad_cuotas"]} cuotas, {plan.get("cuotas_pagas") or 0} pagas')
+		if plan.get('saldo'):
+			detalles.append(f'saldo $ {plan["saldo"]:,.2f}')
+		proximo = plan.get('proximo_vencimiento')
+		if isinstance(proximo, dict) and proximo.get('fecha'):
+			detalles.append(f'próximo vencimiento {proximo["fecha"]}')
+		if detalles:
+			lines.append(f'  - {" | ".join(detalles)}')
+
+	if not facilidades:
+		lines.append('No se encontraron planes de pago activos.')
+
+	lines.append('')
+	lines.append('_Datos obtenidos de Mis Facilidades ARCA en vivo._')
+	return '\n'.join(lines)
+
+
+def format_rentas_response(data: dict[str, Any] | None, cuit: str) -> str:
+	"""Formatea IIBB (rentas Córdoba) desde el registro del DeudaOutput."""
+	error = _error_reply(data, cuit, 'las rentas')
+	if error:
+		return error
+
+	registro = (data or {}).get('registro') or {}
+	jurisdicciones = registro.get('iibb_jurisdicciones') or []
+	cuotas = registro.get('iibb_cuotas_vencidas') or []
+
+	lines = [f'**Rentas Córdoba (IIBB)** — CUIT {cuit}', '']
+
+	if jurisdicciones:
+		lines.append('- **Inscripciones IIBB:**')
+		for j in jurisdicciones[:10]:
+			item = ' — '.join(
+				str(x)
+				for x in [j.get('provincia') or '', f"Insc: {j.get('inscripcion')}" if j.get('inscripcion') else '', j.get('estado') or '']
+				if str(x).strip()
+			)
+			lines.append(f'  - {item}')
+
+	if cuotas:
+		lines.append('- **Cuotas vencidas:**')
+		for c in cuotas[:10]:
+			saldo = c.get('saldo')
+			item = ' — '.join(
+				str(x)
+				for x in [
+					c.get('periodo') or '',
+					c.get('impuesto') or '',
+					f'$ {saldo:,.2f}' if isinstance(saldo, (int, float)) else '',
+					c.get('estado') or '',
+				]
+				if str(x).strip()
+			)
+			lines.append(f'  - {item}')
+
+	if not jurisdicciones and not cuotas:
+		lines.append('No se encontró registro IIBB para la provincia de Córdoba.')
+
+	lines.append('')
+	lines.append('_Datos obtenidos del registro tributario ARCA en vivo._')
+	return '\n'.join(lines)
+
+
+def format_consultaarca_response(data: dict[str, Any] | None, cuit: str) -> str:
+	"""Formatea la consulta al padrón A5 (determinista, sin browser).
+
+	Renderiza la sección **Obligaciones** (keys del mock TS `ejecutarConsultaArca`
+	o los impuestos del padrón ``impuestos_rg``/``impuestos_mt``) más los datos
+	básicos del contribuyente.
+	"""
+	error = _error_reply(data, cuit, 'el padrón ARCA')
+	if error:
+		return error
+
+	data = data or {}
+	lines = [f'**Consulta ARCA (Padrón A5)** — CUIT {cuit}', '']
+
+	denominacion = (
+		data.get('razon_social')
+		or f"{data.get('apellido', '')} {data.get('nombre', '')}".strip()
+		or data.get('denominacion')
+		or ''
+	)
+	if denominacion:
+		lines.append(f'- **Denominación:** {denominacion}')
+
+	tipo = data.get('tipo')
+	if tipo:
+		lines.append(f'- **Condición frente al IVA:** {tipo}')
+
+	estado = data.get('estado') or data.get('estado_clave')
+	if estado:
+		lines.append(f'- **Estado de la clave:** {estado}')
+
+	dom = data.get('domicilio_fiscal')
+	if isinstance(dom, dict):
+		partes = [dom.get('direccion'), dom.get('localidad'), dom.get('ciudad'), dom.get('provincia')]
+		if dom.get('codPostal'):
+			partes.append(f"CP {dom.get('codPostal')}")
+		domicilio = ', '.join(p for p in partes if p)
+		if domicilio:
+			lines.append(f'- **Domicilio fiscal:** {domicilio}')
+
+	# Obligaciones: shape del mock TS (obligaciones[].impuesto/codigo/estado) o
+	# los impuestos del padrón (impuestos_rg + impuestos_mt).
+	obligaciones = data.get('obligaciones')
+	if isinstance(obligaciones, list) and obligaciones:
+		lines.append('- **Obligaciones:**')
+		for ob in obligaciones[:12]:
+			item = ' — '.join(
+				str(x)
+				for x in [ob.get('impuesto') or '', ob.get('codigo') or '', ob.get('estado') or '']
+				if str(x).strip()
+			)
+			lines.append(f'  - {item}')
+	else:
+		impuestos = (data.get('impuestos_rg') or []) + (data.get('impuestos_mt') or [])
+		if impuestos:
+			lines.append('- **Obligaciones:**')
+			for imp in impuestos[:12]:
+				desc = imp.get('descripcionImpuesto') or imp.get('idImpuesto') or 'Impuesto'
+				est = imp.get('estadoImpuesto') or ''
+				lines.append(f'  - {desc}' + (f' — {est}' if est else ''))
+
+	if not denominacion and not obligaciones and not (data.get('impuestos_rg') or data.get('impuestos_mt')):
+		lines.append('No se encontraron datos para el CUIT consultado.')
+
+	lines.append('')
+	lines.append('_Datos del padrón ARCA (consulta determinista, sin browser)._')
+	return '\n'.join(lines)
+
+
+def format_calendario_response(data: dict[str, Any] | None, cuit: str) -> str:
+	"""Formatea el calendario de vencimientos (RulesOutput, determinista)."""
+	error = _error_reply(data, cuit, 'el calendario')
+	if error:
+		return error
+
+	data = data or {}
+	periodo = data.get('periodo') or ''
+	header = f'**Calendario de vencimientos (ARCA)** — CUIT {cuit}'
+	if periodo:
+		header += f' ({periodo})'
+	lines = [header, '']
+
+	vencimientos = data.get('vencimientos') or []
+	observaciones = data.get('observaciones') or []
+
+	if vencimientos:
+		for v in vencimientos[:20]:
+			fecha = v.get('fecha') or ''
+			concepto = v.get('concepto') or ''
+			importe = v.get('importe')
+			line = f'- **{fecha}** — {concepto}'
+			if isinstance(importe, (int, float)):
+				line += f' ($ {importe:,.2f})'
+			lines.append(line)
+
+	if observaciones:
+		lines.append('')
+		lines.append('**Obligaciones informativas:**')
+		lines.append(_bullet([str(o) for o in observaciones]))
+
+	if not vencimientos and not observaciones:
+		lines.append('No se encontraron vencimientos para el período.')
+
+	feriados = data.get('feriados_presentes') or []
+	if feriados:
+		lines.append('')
+		lines.append(f'_Período con {len(feriados)} feriados en los vencimientos calculados._')
+
+	lines.append('')
+	lines.append('_Calendario calculado con el motor de reglas fiscales (sin browser)._')
+	return '\n'.join(lines)
