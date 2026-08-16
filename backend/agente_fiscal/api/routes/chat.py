@@ -1112,6 +1112,11 @@ _ACTION_NAMES: dict[Intent, str] = {
 	Intent.TAXPAYER_QUERY: 'consultar_cuit',
 	Intent.REPORTE_COMPLETO: 'generar_reporte',
 	Intent.SISTEMA_REGISTRAL: 'sistemaregistral',
+	Intent.DEUDA_VENCIMIENTOS: 'deudavencimientos',
+	Intent.MIS_FACILIDADES: 'misfacilidades',
+	Intent.RENTAS_CORDOBA: 'rentascordoba',
+	Intent.CONSULTA_ARCA: 'consultaarca',
+	Intent.CALENDARIO_VENCIMIENTOS_ARCA: 'calendariovencimientosarca',
 }
 
 
