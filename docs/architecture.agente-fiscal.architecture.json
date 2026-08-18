@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Agente Fiscal — Arquitectura de runtime",
+    "subtitle": "Monorepo Next.js 16 (BFF) + FastAPI (Python 3.12)",
+    "output": "architecture.agente-fiscal.html",
+    "quality_profile": "showcase",
+    "visual_preset": "classic",
+    "views": [
+      { "id": "request-path", "label": "Primary request path", "focus": ["users", "clerk", "frontend", "backend", "postgres"], "note": "Browser with a Clerk session hits the Next.js BFF, which forwards the Clerk JWT to the FastAPI backend, which reads/writes PostgreSQL." },
+      { "id": "identity", "label": "Identity and trust", "focus": ["clerk", "frontend", "backend"], "note": "Clerk issues the session; the backend re-verifies the JWT itself (HS256 dev / RS256+JWKS prod) and scopes every query by tenant_id." },
+      { "id": "integrations", "label": "Flag-gated integrations", "focus": ["backend", "browserbase", "arca", "resend", "engram"], "note": "ARCA, browser provider, email and memory are behind feature flags (ARCA_ENABLED / BROWSER_ENABLED) and return 503 when off." },
+      { "id": "cache-and-rate", "label": "Cache and rate limit", "focus": ["backend", "redis"], "note": "Redis backs rate limiting, JWKS caching and best-effort conversation cache; the backend degrades gracefully if Redis is down." }
+    ]
+  },
+  "components": [
+    { "id": "users", "type": "external", "label": "Users", "sublabel": "Browser / Mobile", "pos": [40, 340], "size": [120, 64] },
+    { "id": "clerk", "type": "security", "label": "Clerk", "sublabel": "Identity SaaS", "tag": "OAuth + Orgs", "pos": [40, 150], "size": [120, 64] },
+    { "id": "frontend", "type": "frontend", "label": "Next.js BFF", "sublabel": "App Router :3000", "pos": [300, 340], "size": [150, 64] },
+    { "id": "engram", "type": "external", "label": "Engram", "sublabel": "Fiscal memory", "pos": [300, 150], "size": [120, 64] },
+    { "id": "resend", "type": "cloud", "label": "Resend", "sublabel": "Email", "pos": [300, 560], "size": [120, 64] },
+    { "id": "backend", "type": "backend", "label": "FastAPI + Worker", "sublabel": "API :8000 (in-process worker)", "pos": [560, 340], "size": [160, 64] },
+    { "id": "sentry", "type": "cloud", "label": "Sentry", "sublabel": "Telemetry", "pos": [560, 150], "size": [120, 64] },
+    { "id": "browserbase", "type": "cloud", "label": "Browserbase / Composio", "sublabel": "Browser tools", "pos": [560, 560], "size": [160, 64] },
+    { "id": "postgres", "type": "database", "label": "PostgreSQL", "sublabel": "Neon (source of truth)", "pos": [850, 250], "size": [140, 64] },
+    { "id": "redis", "type": "database", "label": "Redis", "sublabel": "rate-limit + JWKS cache", "pos": [850, 410], "size": [150, 64] },
+    { "id": "arca", "type": "external", "label": "ARCA / AFIP", "sublabel": "Padrón A5 · WSAA", "pos": [850, 560], "size": [130, 64] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "Backend (FastAPI + Worker, tenant-scoped)", "wraps": ["backend", "postgres", "redis"] },
+    { "kind": "region", "label": "External SaaS providers", "wraps": ["clerk", "arca", "browserbase", "resend", "engram"] }
+  ],
+  "connections": [
+    { "id": "users-to-frontend", "from": "users", "to": "frontend", "label": "HTTPS", "variant": "emphasis", "fromSide": "right", "toSide": "left" },
+    { "id": "clerk-to-frontend", "from": "clerk", "to": "frontend", "label": "ClerkProvider", "variant": "security", "fromSide": "right", "toSide": "left" },
+    { "id": "frontend-to-backend", "from": "frontend", "to": "backend", "label": "Bearer JWT", "variant": "emphasis", "fromSide": "right", "toSide": "left" },
+    { "id": "clerk-to-backend", "from": "clerk", "to": "backend", "label": "RS256 / JWKS", "variant": "security", "fromSide": "right", "toSide": "top" },
+    { "id": "backend-to-postgres", "from": "backend", "to": "postgres", "label": "SQL", "fromSide": "right", "toSide": "left" },
+    { "id": "backend-to-redis", "from": "backend", "to": "redis", "label": "cache / rate-limit", "fromSide": "right", "toSide": "left" },
+    { "id": "backend-to-browserbase", "from": "backend", "to": "browserbase", "label": "browser tools", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "labelDy": 30 },
+    { "id": "backend-to-arca", "from": "backend", "to": "arca", "label": "WSAA / Padrón A5", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "id": "backend-to-resend", "from": "backend", "to": "resend", "label": "email", "variant": "dashed", "fromSide": "bottom", "toSide": "right" },
+    { "id": "backend-to-engram", "from": "backend", "to": "engram", "label": "memory", "variant": "dashed", "fromSide": "top", "toSide": "bottom" },
+    { "id": "backend-to-sentry", "from": "backend", "to": "sentry", "label": "telemetry", "variant": "dashed", "fromSide": "top", "toSide": "bottom" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Edge / Identity", "items": ["Clerk handles login + multi-tenant Orgs", "Next.js BFF forwards the Clerk JWT to the backend (never exposes CLERK_SECRET_KEY)"] },
+    { "dot": "emerald", "title": "Application", "items": ["FastAPI + in-process worker (report_runs, human-in-the-loop approval)", "ToolSpec registry routes 6 fiscal tools (browser + deterministic engines) with SSE streaming"] },
+    { "dot": "violet", "title": "Data", "items": ["PostgreSQL (Neon) is the source of truth (tenants, clients, conversations, PDFs, billing)", "Redis = rate-limit + JWKS cache + best-effort conversations (degrades if down)"] },
+    { "dot": "amber", "title": "Integrations (flag-gated)", "items": ["ARCA Padrón A5 / WSAA (ARCA_ENABLED)", "Browserbase / Composio browser tools (BROWSER_ENABLED)", "Resend email + Engram fiscal memory"] }
+  ]
+}

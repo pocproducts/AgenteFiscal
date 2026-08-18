@@ -55,6 +55,20 @@ Monorepo con dos servicios separados:
 
 **Principios de diseño (backend):** arquitectura hexagonal. `domain/` (reglas de negocio, sin I/O), `ports/` (interfaces), `adapters/` (implementaciones: DB, browser, email, ARCA, memory). La API y el worker son los únicos que tocan adapters. Esto aisla la lógica fiscal de los proveedores externos (Clerk, Browserbase, Resend, ARCA).
 
+### Diagrama de arquitectura (Archify)
+
+Generado con [Archify](https://github.com/tt-a1i/archify) a partir del código real del repo. El diagrama es un artefacto **HTML interactivo** (temas claro/oscuro, zoom, rutas, historias, export a SVG/PNG desde el menú).
+
+- **[Abrir diagrama interactivo (HTML)](docs/architecture.agente-fiscal.html)**
+- **[Fuente tipado JSON IR](docs/architecture.agente-fiscal.architecture.json)** — regenerar con el CLI de Archify:
+  ```bash
+  node archify/bin/archify.mjs render architecture \
+    docs/architecture.agente-fiscal.architecture.json \
+    docs/architecture.agente-fiscal.html --quality standard
+  ```
+
+> Para incrustar una imagen estática en otro lado, abrí el HTML y usá el menú **Export → SVG/PNG**. El SVG inline que genera Archify no es XML estricto (es un viewer HTML), por eso el entregable canonical es el `.html`, no un `.svg` embebido.
+
 ---
 
 ## Estructura del monorepo
@@ -187,11 +201,97 @@ Registro de providers en `provider.py` (`PROVIDERS`: `composio`, `browserbase`, 
 
 **Postgres es la fuente de verdad.** Redis solo cachea rate-limit, JWKS y conversaciones best-effort. Si Redis cae, el backend arranca degradado (el rate-limit pasa a pass-through, auth/Clerk siguen funcionando).
 
+> Esquema completo de columnas, FKs y enums: [Modelado de datos (PostgreSQL)](#modelado-de-datos-postgresql).
+
 ### Billing, MCP y CLI
 
 - `billing/`/`domain/tiers.py`: planes `free` (50 contrib, flat $99), `pro` (10, $0.05/s browser), `pro_max` (200, $199), `enterprise` (unlimited, $299). Las tablas de suscripción/pago existen pero **no hay Stripe/MercadoPago cableado** en el código.
 - `mcp/`: servidor MCP (stdio o HTTP vía `MCP_TRANSPORT`/`MCP_PORT`) que expone las tools fiscales.
 - `cli.py` (Typer): `validate`, `generate-template`, `discover`, `run` (pipeline completo sobre `clients.yaml`), `deuda`, `report` (interactivo), `worker` (loop standalone).
+
+---
+
+## Modelado de datos (PostgreSQL)
+
+El backend usa SQLAlchemy 2 async + Alembic. **18 tablas** en dos módulos (`db/models/core.py`, `db/models/business.py`). Todas heredan `UuidPkMixin` (`id` UUIDv7, PK) y `TimestampMixin` (`created_at`/`updated_at` TIMESTAMPTZ con `server_default=now()`), salvo `messages` (solo `created_at`). La cadena de migraciones es lineal y su head actual es **`0006`** (`generated_pdfs.content_bytes`). Postgres es la fuente de verdad; Redis solo cachea.
+
+### Dominio core — identidad, tenants, auth y planes
+
+**`tenants`** — organización del cliente (Clerk Org). `clerk_org_id` (varchar(255), único, nullable hasta vincular).
+
+| Columna | Tipo | Nul | Clave | Notas |
+|---|---|---|---|---|
+| `name` | varchar(255) | NO | | |
+| `clerk_org_id` | varchar(255) | SÍ | única | `tenants.clerk_org_id` |
+
+**`users`** — persona (Clerk user). `clerk_user_id` (varchar(255), único), `email` (varchar(320)), `display_name`.
+
+**`tenant_members`** — membresías. (`tenant_id`,`user_id`) único; `role` ∈ {owner,admin,member} (check); FKs a `tenants`/`users` CASCADE.
+
+**`api_keys`** — API keys server-to-server (prefijo `fa_`). `key_hash` = **sha256 hex (64 chars)** del raw key (el plaintext nunca se persiste); `scopes` (text[]), `expires_at`, `is_active`, `last_used_at`, `revoked_at`. Única en `key_hash`.
+
+**`apps`** — apps registradas por developer. `tenant_id`→tenants, `developer_id`→users (SET NULL).
+
+**`plans`** — catálogo global (no por tenant). `slug` único, `tier` ∈ {free,pro,pro_max,enterprise}, `currency` ∈ {ARS,USD}, `tokens_included`, `limits`/`features` (JSONB). Sembrado en `a3183d34be98`.
+
+**`plan_prices`** — (`plan_id`,`period`) único; `period` ∈ {monthly,yearly}; `price_cents`.
+
+**`subscriptions`** — una activa por tenant (índice parcial único sobre `tenant_id` donde status activo). `plan_id`→plans (RESTRICT), `status` ∈ {trialing,active,past_due,canceled,expired}, `provider` ∈ {stripe,mercadopago,manual}.
+
+### Dominio business — chat, clientes, reportes, navegador
+
+**`conversations`** — historial de chat. `tenant_id`, `user_id`→users (SET NULL), `profile_id`→profiles (SET NULL, desde 0004), `title`, `status` ∈ {running,done}.
+
+**`messages`** — `conversation_id`→conversations (CASCADE), `role` ∈ {system,user,assistant,tool}, `parts` (JSONB). *No tiene `updated_at`.*
+
+**`clients`** — contribuyentes por CUIT. (`tenant_id`,`cuit`) único; `name`, `email`, `config` (JSONB).
+
+**`profiles`** (0004) — identidad del tenant para reportes (gate). (`tenant_id`,`cuit`) único; `status` ∈ {active,inactive}; `created_by`→users.
+
+**`browser_sessions`** (0005) — contexto de navegador persistido. (`tenant_id`,`profile_id`,`provider`) único; `provider` (default `browserbase`, sin check), `context_id`, `status` ∈ {active,in_use}, métricas `proxy_bytes`/`duration_ms`/`cost_cents`, `expires_at`.
+
+**`report_runs`** — ejecuciones del pipeline fiscal. `profile_id`→profiles (RESTRICT, NOT NULL), `client_id`→clients (SET NULL, FK compuesta `(client_id,tenant_id)`), `cuit`, `status` ∈ {queued,running,done,failed,waiting_approval} (ampliado en 0003), `steps`/`result_summary`/`error` (JSONB), `period_year`/`period_month` (0004), `pending_actions` (JSONB, 0003), `approved_by`/`approved_at`/`rejection_reason` (0003).
+
+**`generated_pdfs`** — PDFs generados. `report_run_id`→report_runs (CASCADE), `storage_key`, `filename`, `size_bytes`, **`content_bytes`** (BYTEA — PDF en Postgres, 0006).
+
+### Dominio billing / tokens
+
+**`billing_events`** — ledger de facturación. `tenant_id`, `plan_id`→plans (SET NULL), `description`, `amount`, `currency` ∈ {ARS,USD}.
+
+**`token_packages`** — paquetes de tokens. `name`, `tokens` (>0), `price_cents`.
+
+**`token_balances`** — saldo por tenant (una fila, `tenant_id` único), `balance`.
+
+**`token_transactions`** — ledger append-only firmado. `tenant_id`, `user_id`/`profile_id`→users/profiles (SET NULL), `type` ∈ {purchase,grant,consume,refund,expiry}, `delta`, `balance_after`, `reference_type`/`reference_id`.
+
+**`invoices`** — `subscription_id`→subscriptions (SET NULL), `kind` ∈ {subscription,recharge}, `status` ∈ {draft,open,paid,void,refunded}, `provider` ∈ {stripe,mercadopago,manual}, `metadata` (JSONB).
+
+**`payments`** — `invoice_id`→invoices (CASCADE), `provider`, `status` ∈ {pending,succeeded,failed,refunded}, `amount`.
+
+### Relaciones (grafo FK / ERD)
+
+- `tenants` es raíz: `tenant_members`, `api_keys`, `apps`, `clients`, `conversations`, `profiles`, `browser_sessions`, `report_runs`, `billing_events`, `token_balances`, `token_transactions`, `invoices`, `subscriptions` → `tenants.id` (CASCADE).
+- `users` → `tenant_members`, `apps.developer_id` (SET NULL), `conversations.user_id`, `profiles.created_by`, `report_runs.user_id`, `token_transactions.user_id` (SET NULL).
+- `profiles` → `conversations.profile_id`, `report_runs.profile_id` (RESTRICT), `token_transactions.profile_id`, `browser_sessions.profile_id` (SET NULL).
+- `clients` → `report_runs.client_id` (SET NULL) + FK compuesta `report_runs(client_id,tenant_id)`.
+- `plans` → `plan_prices.plan_id` (CASCADE), `subscriptions.plan_id` (RESTRICT), `billing_events.plan_id` (SET NULL).
+- `conversations` → `messages.conversation_id` (CASCADE).
+- `report_runs` → `generated_pdfs.report_run_id` (CASCADE).
+- `subscriptions` → `invoices.subscription_id` (SET NULL).
+- `invoices` → `payments.invoice_id` (CASCADE).
+
+### Dominios de valor (enums / check constraints)
+
+`tenant_members.role` {owner,admin,member} · `plans.tier` {free,pro,pro_max,enterprise} · `subscriptions.status` {trialing,active,past_due,canceled,expired} · `conversations.status` {running,done} · `messages.role` {system,user,assistant,tool} · `profiles.status` {active,inactive} · `browser_sessions.status` {active,in_use} · `report_runs.status` {queued,running,done,failed,waiting_approval} · `token_transactions.type` {purchase,grant,consume,refund,expiry} · `invoices.kind` {subscription,recharge} / `invoices.status` {draft,open,paid,void,refunded} · `payments.status` {pending,succeeded,failed,refunded}. `browser_sessions.provider` no tiene check (solo `browserbase` sembrado).
+
+### Notas de flujo de datos
+
+- **Historial de chat:** `Conversation` → `Message` (role + `parts` JSONB), 1:N, cascade.
+- **PDFs en Postgres:** `GeneratedPdf.content_bytes` (BYTEA) guarda el binario; `storage_key` es la referencia a object storage (no usado hoy).
+- **Sesiones de navegador:** `BrowserSession` persiste el `context_id` de Browserbase por (tenant, profile); `status` cicla active↔in_use; métricas al liberar.
+- **API keys:** `key_hash` es sha256 del raw — el plaintext nunca se persiste.
+- **Human-in-the-loop:** `ReportRun.pending_actions` + `approved_by`/`approved_at`; estado `waiting_approval` (0003).
+- **Billing/tokens:** `subscriptions` → `invoices` → `payments`; `token_balances` mutado por `token_transactions` append-only.
 
 ---
 
