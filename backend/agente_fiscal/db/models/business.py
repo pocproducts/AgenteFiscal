@@ -16,6 +16,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     UniqueConstraint,
@@ -282,6 +283,7 @@ class GeneratedPdf(UuidPkMixin, TimestampMixin, Base):
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     size_bytes: Mapped[int] = mapped_column(nullable=False)
+    content_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
     report_run: Mapped[ReportRun] = relationship(back_populates='generated_pdfs')
 

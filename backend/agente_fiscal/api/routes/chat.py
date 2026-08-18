@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -68,11 +69,16 @@ from typing import Any, Callable, Optional
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from uuid import UUID
 
 from agente_fiscal.api.profile_gate import ActiveProfileContext, validate_active_profile
 from agente_fiscal.api.store import RedisStore
-from agente_fiscal.db.models import ReportRun
+from agente_fiscal.db.conversation_repo import (
+	insert_generated_pdf,
+	upsert_conversation,
+)
+from agente_fiscal.db.models import ReportRun, User
 from agente_fiscal.domain.intent_router import Intent, detect
 from agente_fiscal.domain.models import ApiError, UnifiedResponse
 from agente_fiscal.domain.response_builder import (
@@ -87,6 +93,8 @@ from agente_fiscal.domain.response_builder import (
 from agente_fiscal.domain.tool_spec import INTENT_TO_KEY, TOOL_SPECS, ToolSpec
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 # ── Request / Response models ───────────────────────────────────────────────
 
@@ -251,6 +259,81 @@ async def _persist_chat_report_run(
 			await session.rollback()
 			return None
 	return str(run.id)
+
+
+# ── Chat conversation persistence (Postgres, best-effort) ────────────────
+
+
+async def _persist_conversation(
+	fastapi_request: Request,
+	conversation_id: str,
+	messages: list[dict[str, Any]],
+	*,
+	title: str | None = None,
+	profile_id: UUID | None = None,
+	status: str = 'running',
+) -> None:
+	"""Persiste la conversación en Postgres sin romper el streaming SSE.
+
+	La DB nunca debe romper la respuesta: si la session factory falta, el
+	tenant no se resuelve o el commit falla, se loguea un warning y se sigue.
+	El ``user_id`` ORM se resuelve desde ``clerk_user_id`` (None para API keys).
+	"""
+	factory = getattr(fastapi_request.app.state, 'session_factory', None)
+	tenant_id = getattr(fastapi_request.state, 'tenant_id', None)
+	if factory is None or not tenant_id:
+		return
+	try:
+		tenant_uuid = UUID(str(tenant_id))
+	except (TypeError, ValueError):
+		return
+	clerk_user_id = getattr(fastapi_request.state, 'clerk_user_id', None)
+	try:
+		async with factory() as session:
+			user_id: UUID | None = None
+			if clerk_user_id:
+				user_id = await session.scalar(
+					select(User.id).where(User.clerk_user_id == clerk_user_id).limit(1)
+				)
+			await upsert_conversation(
+				session,
+				tenant_id=tenant_uuid,
+				user_id=user_id,
+				profile_id=profile_id,
+				conversation_id=conversation_id,
+				title=title,
+				messages=messages,
+				status=status,
+			)
+	except Exception as exc:
+		logger.warning('No se pudo persistir la conversación %s en Postgres: %s', conversation_id, exc)
+
+
+async def _persist_chat_pdf(
+	fastapi_request: Request,
+	report_run_id: str,
+	pdf_path: str | Path,
+) -> None:
+	"""Persiste los bytes del PDF generado en ``generated_pdfs`` (best-effort)."""
+	factory = getattr(fastapi_request.app.state, 'session_factory', None)
+	if factory is None or not report_run_id or not pdf_path:
+		return
+	try:
+		path = Path(pdf_path)
+		if not path.is_file():
+			logger.warning('PDF %s no existe en disco — saltando persistencia', pdf_path)
+			return
+		data = path.read_bytes()
+		async with factory() as session:
+			await insert_generated_pdf(
+				session,
+				report_run_id=UUID(str(report_run_id)),
+				storage_key=f'storage/calendarios/{path.name}',
+				filename=path.name,
+				data=data,
+			)
+	except Exception as exc:
+		logger.warning('No se pudo persistir el PDF %s en generated_pdfs: %s', pdf_path, exc)
 
 
 # ── Sync handlers (run in thread pool to avoid blocking the event loop) ──────
@@ -891,6 +974,8 @@ async def chat_wizard(
 				mes=chat_mes,
 				anio=chat_anio,
 			)
+			if report_run_id and data and data.get('pdf_path'):
+				await _persist_chat_pdf(fastapi_request, report_run_id, str(data['pdf_path']))
 			pdf_url = None
 			if data and data.get('pdf_path'):
 				# Extract filename for download URL
@@ -900,6 +985,16 @@ async def chat_wizard(
 				data['pdf_path'] = str(data['pdf_path'])
 				filename = os.path.basename(data['pdf_path'])
 				pdf_url = f'/v1/chat/reports/{filename}'
+			await _persist_conversation(
+				fastapi_request,
+				conversation_id,
+				[
+					{'role': 'user', 'content': f'Generar reporte fiscal para CUIT {cuit}'},
+					{'role': 'assistant', 'content': reply},
+				],
+				profile_id=request.profile_id,
+				status='done',
+			)
 			complete_payload: dict[str, Any] = {
 				'reply': reply,
 				'data': data,
@@ -996,6 +1091,16 @@ async def chat_message_stream(
 					{'role': 'assistant', 'content': reply},
 				],
 			)
+		await _persist_conversation(
+			fastapi_request,
+			conversation_id,
+			[
+				{'role': 'user', 'content': message},
+				{'role': 'assistant', 'content': reply},
+			],
+			profile_id=request.profile_id,
+			status='done',
+		)
 		return StreamingResponse(
 			_iter_sse_early(conversation_id, reply),
 			media_type='text/event-stream',
@@ -1017,6 +1122,16 @@ async def chat_message_stream(
 					{'role': 'assistant', 'content': reply},
 				],
 			)
+		await _persist_conversation(
+			fastapi_request,
+			conversation_id,
+			[
+				{'role': 'user', 'content': message},
+				{'role': 'assistant', 'content': reply},
+			],
+			profile_id=request.profile_id,
+			status='done',
+		)
 		return StreamingResponse(
 			_iter_sse_early(conversation_id, reply),
 			media_type='text/event-stream',
@@ -1146,6 +1261,18 @@ async def chat_message_stream(
 							assistant_entry,
 						],
 					)
+				# Persistencia en Postgres: la conversación queda 'done' al
+				# emitir complete (la DB nunca rompe el streaming).
+				await _persist_conversation(
+					fastapi_request,
+					conversation_id,
+					[
+						{'role': 'user', 'content': message},
+						{'role': 'assistant', 'content': reply},
+					],
+					profile_id=request.profile_id,
+					status='done',
+				)
 				complete_payload: dict[str, Any] = {'reply': reply, 'data': safe_data, 'conversation_id': conversation_id}
 				# Mismo canal FIFO que progress/live_url/agent_step (call_soon_threadsafe):
 				# si el hilo del worker dejó progresos en cola, el loop los drena
@@ -1205,6 +1332,16 @@ async def chat_message_stream(
 					{'role': 'assistant', 'content': reply},
 				],
 			)
+		await _persist_conversation(
+			fastapi_request,
+			conversation_id,
+			[
+				{'role': 'user', 'content': message},
+				{'role': 'assistant', 'content': reply},
+			],
+			profile_id=request.profile_id,
+			status='done',
+		)
 		return StreamingResponse(
 			_iter_sse_early(conversation_id, reply),
 			media_type='text/event-stream',
@@ -1245,6 +1382,8 @@ async def chat_message_stream(
 				mes=chat_mes,
 				anio=chat_anio,
 			)
+			if report_run_id and data and data.get('pdf_path'):
+				await _persist_chat_pdf(fastapi_request, report_run_id, str(data['pdf_path']))
 			if tenant_id and store is not None:
 				assistant_entry: dict[str, Any] = {'role': 'assistant', 'content': reply}
 				if _progress_messages:
@@ -1257,6 +1396,16 @@ async def chat_message_stream(
 						assistant_entry,
 					],
 				)
+			await _persist_conversation(
+				fastapi_request,
+				conversation_id,
+				[
+					{'role': 'user', 'content': message},
+					{'role': 'assistant', 'content': reply},
+				],
+				profile_id=request.profile_id,
+				status='done',
+			)
 			# Ensure data is JSON-serializable (e.g. PosixPath → str)
 			safe_data: dict[str, Any] | None = None
 			if data:
@@ -1280,6 +1429,16 @@ async def chat_message_stream(
 						{'role': 'assistant', 'content': reply},
 					],
 				)
+			await _persist_conversation(
+				fastapi_request,
+				conversation_id,
+				[
+					{'role': 'user', 'content': message},
+					{'role': 'assistant', 'content': reply},
+				],
+				profile_id=request.profile_id,
+				status='done',
+			)
 			await queue.put(('complete', {'reply': reply, 'data': None, 'conversation_id': conversation_id}))
 
 	async def _generate():
@@ -1367,6 +1526,16 @@ async def chat_message(
 					{'role': 'assistant', 'content': reply},
 				],
 			)
+		await _persist_conversation(
+			fastapi_request,
+			conversation_id,
+			[
+				{'role': 'user', 'content': message},
+				{'role': 'assistant', 'content': reply},
+			],
+			profile_id=request.profile_id,
+			status='done',
+		)
 		return ChatResponse(
 			conversation_id=conversation_id,
 			reply=reply,
@@ -1389,6 +1558,16 @@ async def chat_message(
 					{'role': 'assistant', 'content': reply},
 				],
 			)
+		await _persist_conversation(
+			fastapi_request,
+			conversation_id,
+			[
+				{'role': 'user', 'content': message},
+				{'role': 'assistant', 'content': reply},
+			],
+			profile_id=request.profile_id,
+			status='done',
+		)
 		return ChatResponse(
 			conversation_id=conversation_id,
 			reply=reply,
@@ -1427,6 +1606,8 @@ async def chat_message(
 				)
 				if report_run_id and isinstance(data, dict):
 					data['report_run_id'] = report_run_id
+					if data.get('pdf_path'):
+						await _persist_chat_pdf(fastapi_request, report_run_id, str(data['pdf_path']))
 			reply = format_reporte_response(data, cuit)
 		elif intent in INTENT_TO_KEY:
 			spec = TOOL_SPECS[INTENT_TO_KEY[intent]]
@@ -1446,6 +1627,16 @@ async def chat_message(
 					{'role': 'assistant', 'content': reply},
 				],
 			)
+		await _persist_conversation(
+			fastapi_request,
+			conversation_id,
+			[
+				{'role': 'user', 'content': message},
+				{'role': 'assistant', 'content': reply},
+			],
+			profile_id=request.profile_id,
+			status='done',
+		)
 		return ChatResponse(
 			conversation_id=conversation_id,
 			reply=reply,
@@ -1461,6 +1652,16 @@ async def chat_message(
 				{'role': 'assistant', 'content': reply},
 			],
 		)
+	await _persist_conversation(
+		fastapi_request,
+		conversation_id,
+		[
+			{'role': 'user', 'content': message},
+			{'role': 'assistant', 'content': reply},
+		],
+		profile_id=request.profile_id,
+		status='done',
+	)
 	return ChatResponse(
 		conversation_id=conversation_id,
 		reply=reply,

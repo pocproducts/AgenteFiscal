@@ -3,11 +3,11 @@
 # dev.sh — local orchestration for Agente Fiscal (backend + frontend).
 #
 # Usage:
-#   ./dev.sh up [--migrate]   Start backend (:8000) + frontend (:3000).
+#   ./dev.sh up [--migrate]   Start Redis + backend (:8000) + frontend (:3000).
 #                             --migrate applies Alembic migrations first.
-#   ./dev.sh down             Stop backend + frontend.
+#   ./dev.sh down             Stop backend + frontend + Redis.
 #   ./dev.sh restart [--migrate]  down + up.
-#   ./dev.sh status           Show running state + health for both services.
+#   ./dev.sh status           Show running state + health for all services.
 #   ./dev.sh logs [backend|frontend]  Tail the log file.
 #   ./dev.sh migrate          Apply Alembic migrations (backend).
 #   ./dev.sh seed             Run the idempotent seed script (backend).
@@ -16,6 +16,9 @@
 # Notes:
 #   - The fiscal worker runs IN-PROCESS inside uvicorn (FastAPI lifespan), so
 #     starting the backend also starts the worker.
+#   - Redis is started locally as a daemon (port 6379) only when no Redis is
+#     already responding; its dump file lives in .run/redis/ (gitignored) so
+#     the repo root never gets a stray dump.rdb.
 #   - Runtime artifacts (pid files + logs) live in .run/ (gitignored).
 #   - Env: DATABASE_URL / REDIS_URL / CLERK_* are read from backend/.env and
 #     frontend/.env.local; no secrets are needed here.
@@ -35,6 +38,10 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 BACKEND_URL="http://localhost:$BACKEND_PORT"
 FRONTEND_URL="http://localhost:$FRONTEND_PORT"
+REDIS_PORT="${REDIS_PORT:-6379}"
+REDIS_PID="$RUN_DIR/redis.pid"
+REDIS_LOG="$RUN_DIR/redis.log"
+REDIS_DATA_DIR="$RUN_DIR/redis"
 
 PY="$BACKEND_DIR/.venv/bin/python"
 UVICORN="$BACKEND_DIR/.venv/bin/uvicorn"
@@ -55,6 +62,61 @@ frontend_http() { local c; c="$(http_code "$FRONTEND_URL/ping")"; echo "${c:-000
 
 port_in_use() { ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":$1$"; }
 
+redis_up() { command -v redis-cli >/dev/null 2>&1 && redis-cli -p "$REDIS_PORT" ping >/dev/null 2>&1; }
+
+start_redis() {
+  if redis_up; then
+    log "Redis ya está corriendo en localhost:$REDIS_PORT"
+    return 0
+  fi
+  if ! command -v redis-server >/dev/null 2>&1; then
+    err "redis-server no está en el PATH. Instalalo (apt install redis-server o brew install redis)."
+    return 1
+  fi
+  if port_in_use "$REDIS_PORT"; then
+    err "Puerto $REDIS_PORT ocupado por un proceso ajeno — Redis no puede arrancar."
+    return 1
+  fi
+  log "Arrancando Redis en localhost:$REDIS_PORT ..."
+  mkdir -p "$RUN_DIR" "$REDIS_DATA_DIR"
+  redis-server \
+    --port "$REDIS_PORT" \
+    --daemonize yes \
+    --pidfile "$REDIS_PID" \
+    --logfile "$REDIS_LOG" \
+    --dir "$REDIS_DATA_DIR" \
+    --dbfilename dump.rdb \
+    --save 900 1 \
+    --save 300 10 \
+    --save 60 10000 \
+    --appendonly no
+  sleep 0.5
+  if redis_up; then
+    log "Redis listo (pid $(cat "$REDIS_PID" 2>/dev/null || echo '?'))"
+    return 0
+  fi
+  err "Redis no respondió tras arrancar. Log: $REDIS_LOG"
+  return 1
+}
+
+stop_redis() {
+  # Solo detiene el Redis que levantó este script (pidfile propio), nunca un
+  # Redis externo que ya estuviera corriendo.
+  local pid
+  pid="$(read_pid "$REDIS_PID")"
+  if [ -n "$pid" ] && pid_alive "$pid"; then
+    log "Deteniendo Redis (pid $pid) ..."
+    redis-cli -p "$REDIS_PORT" shutdown nosave >/dev/null 2>&1 || kill -TERM "$pid" 2>/dev/null || true
+    local i=0
+    while pid_alive "$pid" && [ "$i" -lt 20 ]; do sleep 0.5; i=$((i + 1)); done
+    [ -f "$REDIS_PID" ] && rm -f "$REDIS_PID"
+  elif redis_up; then
+    log "Redis externo corriendo en localhost:$REDIS_PORT — no lo detengo (no lo levanté yo)."
+  else
+    log "Redis no estaba corriendo."
+  fi
+}
+
 check_prereqs() {
   if [ ! -x "$PY" ] || [ ! -x "$UVICORN" ] || [ ! -x "$ALEMBIC" ]; then
     err "Backend venv incompleto en backend/.venv. Creálo con: cd backend && python3 -m venv .venv && .venv/bin/pip install -e ."
@@ -64,8 +126,8 @@ check_prereqs() {
     err "pnpm no está en el PATH. Instalalo (corepack enable o npm i -g pnpm)."
     return 1
   fi
-  if command -v redis-cli >/dev/null 2>&1 && ! redis-cli ping >/dev/null 2>&1; then
-    warn "Redis no responde en localhost:6379 — el backend arrancará pero rate-limit/JWKS cache fallarán."
+  if command -v redis-cli >/dev/null 2>&1 && ! redis_up; then
+    warn "Redis no responde en localhost:$REDIS_PORT — ./dev.sh up lo intentará levantar automáticamente."
   fi
   if [ ! -f "$BACKEND_DIR/.env" ]; then
     warn "No existe backend/.env — copialo desde backend/.env.example y completá DATABASE_URL, REDIS_URL, CLERK_*"
@@ -158,20 +220,23 @@ cmd_up() {
   check_prereqs
   local MIGRATE=false
   [ "${1:-}" = "--migrate" ] && MIGRATE=true
+  start_redis || return 1
   if [ "$MIGRATE" = true ]; then
     cmd_migrate
   fi
   start_backend "$(read_pid "$BACKEND_PID")" || { warn "Backend no levantó — revisá $BACKEND_LOG"; return 1; }
   start_frontend "$(read_pid "$FRONTEND_PID")" || { warn "Frontend no levantó — revisá $FRONTEND_LOG"; return 1; }
   log "Sistema arriba:"
+  log "  Redis    → localhost:$REDIS_PORT"
   log "  Backend  → $BACKEND_URL   (docs en $BACKEND_URL/docs)"
   log "  Frontend → $FRONTEND_URL"
-  log "  Logs     → $BACKEND_LOG / $FRONTEND_LOG"
+  log "  Logs     → $BACKEND_LOG / $FRONTEND_LOG / $REDIS_LOG"
 }
 
 cmd_down() {
   stop_service "backend" "$BACKEND_PID"
   stop_service "frontend" "$FRONTEND_PID"
+  stop_redis
   log "Sistema detenido."
 }
 
@@ -179,6 +244,11 @@ cmd_status() {
   local bp fp
   bp="$(read_pid "$BACKEND_PID")"
   fp="$(read_pid "$FRONTEND_PID")"
+  if redis_up; then
+    printf 'Redis    : up   (localhost:%s)\n' "$REDIS_PORT"
+  else
+    printf 'Redis    : down (localhost:%s)\n' "$REDIS_PORT"
+  fi
   printf 'Backend  : pid=%s estado=%s http=%s\n' \
     "${bp:-—}" \
     "$(pid_alive "$bp" && echo up || echo down)" \

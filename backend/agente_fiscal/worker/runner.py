@@ -221,6 +221,41 @@ class ReportRunner:
 				if run.status != 'waiting_approval':
 					run.finished_at = datetime.now(timezone.utc)
 					await session.commit()
+					# Persist PDF bytes into Postgres (best-effort): only after
+					# the run is done and only when a PDF was produced.
+					if run.status == 'done':
+						pdf_path = steps.get('proposal_pdf') or getattr(result, 'pdf_path', None)
+						if pdf_path:
+							await self._persist_pdf_bytes(run.id, str(pdf_path))
+
+	async def _persist_pdf_bytes(self, report_run_id: UUID, pdf_path: str) -> None:
+		"""Persist the generated PDF's bytes into ``generated_pdfs`` (best-effort).
+
+		Reads the PDF from disk and stores it in Postgres so serving/rendering
+		doesn't depend on the filesystem. Never raises: on any failure the PDF
+		already lives on disk, so the run outcome is unaffected.
+		"""
+		try:
+			from pathlib import Path
+
+			from agente_fiscal.db.conversation_repo import insert_generated_pdf
+
+			path = Path(pdf_path)
+			if not path.is_file():
+				logger.warning('PDF %s no existe — saltando persistencia en DB', pdf_path)
+				return
+			data = path.read_bytes()
+			async with self._session_factory() as session:
+				await insert_generated_pdf(
+					session,
+					report_run_id=report_run_id,
+					storage_key=str(path),
+					filename=path.name,
+					data=data,
+				)
+			logger.info('PDF %s persistido en generated_pdfs (%d bytes)', path.name, len(data))
+		except Exception as exc:
+			logger.warning('No se pudo persistir el PDF de %s en Postgres: %s', pdf_path, exc)
 
 	async def _build_cliente(self, session: AsyncSession, run: ReportRun) -> ClientConfig:
 		"""Build the pipeline's ``ClientConfig``, resolving email/nombre from ``clients`` when linked.

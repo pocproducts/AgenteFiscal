@@ -17,12 +17,9 @@ import {
   callBackendStream,
 } from "@/lib/backend/client";
 import {
-  getChatById,
-  saveChat,
-  saveMessages,
-  updateChatStatusById,
-  updateChatTitleById,
-} from "@/lib/db/queries";
+  deleteConversation,
+  saveConversation,
+} from "@/lib/backend/conversations";
 import { ChatbotError, type ErrorCode } from "@/lib/errors";
 import { tenantKey } from "@/lib/tenant";
 import { generateUUID } from "@/lib/utils";
@@ -149,24 +146,6 @@ function describeBackendError(err: unknown): {
 // source of truth lives in `lib/agent-window.ts` — change the window there and
 // both this route and the streamed UI contract move together.
 
-async function persistAssistantMessage(chatId: string, text: string) {
-  if (!text) {
-    return;
-  }
-  await saveMessages({
-    messages: [
-      {
-        id: generateUUID(),
-        chatId,
-        role: "assistant",
-        parts: [{ type: "text", text }],
-        attachments: [],
-        createdAt: new Date(),
-      },
-    ],
-  });
-}
-
 /**
  * API Chat - Fiscal Console (backend-backed)
  * Forwards the user's natural language message to the real Python backend
@@ -182,14 +161,12 @@ export async function POST(request: Request) {
     messages: initialMessages = [],
     message: singularMessage,
     isToolApprovalFlow,
-    selectedVisibilityType,
     profileId,
   } = body;
 
   const activeProfileId =
     typeof profileId === "string" && profileId.trim() ? profileId.trim() : null;
 
-  const visibility = selectedVisibilityType || "private";
   const uiMessages = singularMessage
     ? [singularMessage]
     : initialMessages || [];
@@ -207,56 +184,9 @@ export async function POST(request: Request) {
       return new ChatbotError("bad_request:api").toResponse();
     }
 
-    // Persist initial message for chat history
-    if (uiMessages.length === 1 && userId) {
-      try {
-        const existingChat = await getChatById({ id });
-        if (!existingChat) {
-          const rawText =
-            typeof message.content === "string"
-              ? message.content
-              : message.parts?.find((p: any) => p.type === "text")?.text || "";
-          const quickCuitMatch = rawText.match(/(\d{11})/);
-
-          const now = new Date();
-          const day = now.getDate().toString().padStart(2, "0");
-          const month = (now.getMonth() + 1).toString().padStart(2, "0");
-          const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
-          const timestamp = `${day}/${month} ${time}`;
-          const title = quickCuitMatch
-            ? `Informe ${quickCuitMatch[1]} — ${timestamp}`
-            : `Consola Fiscal — ${timestamp}`;
-
-          await saveChat({
-            id,
-            userId,
-            tenantId: tenant,
-            title,
-            visibility,
-            status: "running",
-          });
-        }
-
-        await saveMessages({
-          messages: [
-            {
-              id: generateUUID(),
-              chatId: id,
-              role: message.role,
-              parts:
-                message.parts ||
-                (message.content
-                  ? [{ type: "text", text: message.content }]
-                  : []),
-              attachments: message.attachments || [],
-              createdAt: new Date(),
-            },
-          ],
-        });
-      } catch (e) {
-        console.error("Historical persistence failed:", e);
-      }
-    }
+    // Message/conversation persistence is owned by the backend: both
+    // /v1/chat/message and /v1/chat/message/stream upsert the conversation
+    // (user + assistant) in Postgres themselves. Nothing to save here.
 
     let userText = "";
     if (message.content && typeof message.content === "string") {
@@ -605,23 +535,14 @@ export async function POST(request: Request) {
               ? `Informe ${cuit} — ${timestamp}`
               : `Consulta Fiscal — ${timestamp}`;
             dataStream.write({ type: "data-chat-title", data: title });
+            // The backend persisted the conversation itself (user + assistant,
+            // status done). Only the final title is BFF-owned: upsert it so
+            // the sidebar shows the friendly title instead of the default.
             try {
-              await updateChatTitleById({ chatId: id, title });
+              await saveConversation({ id, title });
             } catch (titleErr) {
               console.error("Failed to save chat title:", titleErr);
             }
-          }
-
-          try {
-            await persistAssistantMessage(id, assistantText);
-          } catch (persistErr) {
-            console.error("Failed to save assistant report:", persistErr);
-          }
-
-          try {
-            await updateChatStatusById({ chatId: id, status: "done" });
-          } catch (statusErr) {
-            console.error("Failed to update chat status:", statusErr);
           }
 
           inFlightExecutions.delete(executionKey);
@@ -637,6 +558,35 @@ export async function POST(request: Request) {
   }
 }
 
-export function DELETE(_request: Request) {
-  return Response.json({ success: true }, { status: 200 });
+export async function DELETE(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const chatId = searchParams.get("id");
+
+  if (!chatId) {
+    return new ChatbotError(
+      "bad_request:api",
+      "Parameter id is required."
+    ).toResponse();
+  }
+
+  const { userId } = await auth();
+  if (!userId) {
+    return new ChatbotError("unauthorized:chat").toResponse();
+  }
+
+  try {
+    await deleteConversation(chatId);
+    return Response.json({ success: true }, { status: 200 });
+  } catch (err) {
+    // The backend returns 404 both for missing chats and for chats the caller
+    // may not delete; treat it as a successful no-op so the sidebar removes
+    // the row regardless.
+    if (err instanceof BackendError && err.status === 404) {
+      return Response.json({ success: true }, { status: 200 });
+    }
+    const { detail } = describeBackendError(err);
+    const code =
+      err instanceof BackendError ? backendErrorToCode(err) : "offline:chat";
+    return new ChatbotError(code, detail).toResponse();
+  }
 }

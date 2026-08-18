@@ -19,7 +19,16 @@ import type {
 } from "./schema";
 
 /**
- * In-memory mock database persisted to a JSON file.
+ * DEPRECATED in-memory mock database persisted to a JSON file.
+ *
+ * The chat-history surface (chats/messages list, delete, delete-all) is now
+ * handled by the real backend (Postgres): the BFF routes call
+ * `frontend/lib/backend/conversations.ts` → /v1/conversations. The chat
+ * functions below (saveChat / saveMessages / getChatsByUserId /
+ * deleteAllChatsByUserId / getMessagesByChatId) are no longer wired into
+ * the chat flow and should NOT be re-used — they are kept only because the
+ * documents/suggestions/vote/mail surfaces still depend on this store until
+ * those migrations land.
  *
  * Why file-backed + globalThis singleton:
  * - Next.js bundles Server Actions and Route Handlers separately, so module-level
