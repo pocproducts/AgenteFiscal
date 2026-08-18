@@ -23,29 +23,50 @@ export type SlashCommand = {
   shortcut?: string;
 };
 
-/** Tool keys expanded by /todo, in the same order the server macro runs them. */
+/**
+ * Canonical tool order, mirroring the backend pipeline in
+ * backend/agente_fiscal/api/routes/chat.py: the four browser tools
+ * (`_PIPELINE_FLAG_ORDER`) followed by the deterministic engines
+ * (`_DETERMINISTIC_ORDER`), `informefiscal` and `enviarmail` last.
+ * Expanded by `/todo` and the only order `expandPlan` ever produces.
+ */
 export const TODO_TOOL_KEYS: string[] = [
-  "consultaarca",
-  "sistemaregistral",
-  "misfacilidades",
   "deudavencimientos",
+  "misfacilidades",
+  "sistemaregistral",
   "rentascordoba",
+  "consultaarca",
   "calendariovencimientosarca",
   "informefiscal",
   "enviarmail",
 ];
 
-/** Expands a command into the ordered list of tools that will actually run. */
+/**
+ * Expands a multi-command selection into the ordered list of tools that will
+ * actually run (deduped). Generalized version of `expandCommandPlan`.
+ *
+ * The plan ALWAYS follows the backend's canonical pipeline order
+ * (`TODO_TOOL_KEYS`), never the user's selection order:
+ * - when `todo` is selected it wins: the plan is the full `TODO_TOOL_KEYS`;
+ * - otherwise the canonical order is filtered down to the selected keys, with
+ *   `informefiscal` / `enviarmail` included only when also selected.
+ */
+export function expandPlan(commands: SlashCommand[]): SlashCommand[] {
+  const selected = new Set(commands.map((cmd) => cmd.action));
+  const keys = selected.has("todo")
+    ? TODO_TOOL_KEYS
+    : TODO_TOOL_KEYS.filter((key) => selected.has(key));
+  const byAction = new Map(
+    slashCommands.map((cmd) => [cmd.action, cmd] as const)
+  );
+  return keys
+    .map((key) => byAction.get(key))
+    .filter((cmd): cmd is SlashCommand => cmd !== undefined);
+}
+
+/** Expands a single command into the ordered list of tools that will run. */
 export function expandCommandPlan(command: SlashCommand): SlashCommand[] {
-  if (command.action === "todo") {
-    const byAction = new Map(
-      slashCommands.map((cmd) => [cmd.action, cmd] as const)
-    );
-    return TODO_TOOL_KEYS.map((key) => byAction.get(key)).filter(
-      (cmd): cmd is SlashCommand => cmd !== undefined
-    );
-  }
-  return [command];
+  return expandPlan([command]);
 }
 
 export const slashCommands: SlashCommand[] = [

@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Clock, Cpu, Tag, Target, UserIcon } from "lucide-react";
+import { Activity, Clock, Cpu, Tag, Target, UserIcon } from lucide-react;
 import { Badge } from "@/components/ui/badge";
 import { useAgentSidebar } from "@/hooks/use-agent-sidebar";
 import { useLiveClock } from "@/hooks/use-live-clock";
@@ -8,13 +8,62 @@ import { useProfiles } from "@/hooks/use-profiles";
 import { formatClock } from "@/lib/agent-window";
 import { useLanguage } from "@/lib/i18n";
 
+// Tipos para tareas de agente
+type AgentTask = {
+  id: string;
+  label: string;
+  status: "pending" | "running" | "completed" | "error";
+  durationMs?: number;
+  costCents?: number;
+};
+
+type AgentSession = {
+  agentId: string;
+  toolName: string;
+  profileId?: string;
+  messageId: string;
+  status: "idle" | "running" | "completed" | "error";
+  tasks: AgentTask[];
+  totalCostCents: number;
+  startedAt?: number;
+  completedAt?: number;
+};
+
+// Helper to get profile name
+const getProfileName = (profileId: string | undefined): string => {
+  if (!profileId) {
+    return "—";
+  }
+  // En producción, esto vendría del state de profiles
+  return profileId;
+};
+
+// Helper to get task summary
+const getTaskSummary = (tasks: AgentTask[]): string => {
+  if (!tasks || tasks.length === 0) {
+    return "—";
+  }
+  const running = tasks.filter((t) => t.status === "running").length;
+  const completed = tasks.filter((t) => t.status === "completed").length;
+  const failed = tasks.filter((t) => t.status === "error").length;
+  const pending = tasks.length - running - completed - failed;
+
+  const parts: string[] = [];
+  if (running > 0) parts.push(`${running} running`);
+  if (completed > 0) parts.push(`${completed} completed`);
+  if (failed > 0) parts.push(`${failed} failed`);
+  if (pending > 0) parts.push(`${pending} pending`);
+
+  return parts.length > 0 ? parts.join(", ") : "—";
+};
+
 export default function AgentSessionsPage() {
   const { allSessions } = useAgentSidebar();
   const { profiles } = useProfiles();
   const { t } = useLanguage();
   const dict = t.panel.pages.dashboards;
 
-  const sortedSessions = [...allSessions].sort(
+  const sortedSessions: AgentSession[] = [...allSessions].sort(
     (a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0)
   );
 
@@ -22,40 +71,6 @@ export default function AgentSessionsPage() {
   // is running, matching the chat sidebar clock.
   const anyRunning = sortedSessions.some((s) => s.status === "running");
   const nowMs = useLiveClock(anyRunning);
-
-  // Helper to find profile name of a session
-  const getProfileName = (profileId?: string) => {
-    if (!profileId) {
-      return "—";
-    }
-    const found = profiles.find((p) => p.id === profileId);
-    return found ? found.name : profileId;
-  };
-
-  // Helper to get formatted last task or current task
-  const getLastTaskLabel = (
-    tasks: Array<{ label: string; status: string }>
-  ) => {
-    if (!tasks || tasks.length === 0) {
-      return dict.initializing;
-    }
-
-    // Find first running task
-    const running = tasks.find((t) => t.status === "running");
-    if (running) {
-      return running.label;
-    }
-
-    // Else find the last completed task
-    const completed = [...tasks]
-      .reverse()
-      .find((t) => t.status === "completed");
-    if (completed) {
-      return completed.label;
-    }
-
-    return tasks[0].label;
-  };
 
   return (
     <div className="flex flex-1 flex-col h-full bg-background/50">
@@ -78,7 +93,7 @@ export default function AgentSessionsPage() {
               <tr>
                 <th className="px-5 py-3.5 font-medium">
                   <div className="flex items-center gap-1.5">
-                    <Target className="size-4 shrink-0" /> {dict.goal}
+                    <Target className="size-4 shrink-0" /> {getTaskSummary(sortedSessions[0]?.tasks ?? [])}
                   </div>
                 </th>
                 <th className="px-5 py-3.5 font-medium">
@@ -114,7 +129,7 @@ export default function AgentSessionsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
-              {sortedSessions.map((s, i) => {
+              {sortedSessions.map((s: AgentSession, i: number) => {
                 const totalCostUsd = s.totalCostCents / 100;
                 const duration = s.startedAt
                   ? formatClock((s.completedAt ?? nowMs) - s.startedAt)

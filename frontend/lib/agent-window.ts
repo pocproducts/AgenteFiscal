@@ -28,9 +28,23 @@ export const AGENT_SESSION_WINDOW_MS = 10 * 60_000;
 // Windows live ONLY here (backend ToolSpec carries no window_ms).
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Single canonical list of tool keys, from which both matcher regexes derive
+// (avoids drift between the single-tool matcher and the multi-tool global one).
+const TOOL_KEY_LIST =
+  "deudavencimientos|misfacilidades|rentascordoba|sistemaregistral|consultaarca|calendariovencimientosarca";
+
 /** Matches the six browser-tool keys anywhere in a direct command. */
-export const TOOL_KEY_RE =
-  /\b(?:deudavencimientos|misfacilidades|rentascordoba|sistemaregistral|consultaarca|calendariovencimientosarca)\b/i;
+export const TOOL_KEY_RE = new RegExp(`\\b(?:${TOOL_KEY_LIST})\\b`, "i");
+
+/**
+ * Matches EVERY tool key in a message, including the `informefiscal` /
+ * `enviarmail` macros — used to parse multi-tool launch messages so the BFF
+ * can forward the whole selection (not just the first token) to the backend.
+ */
+export const TOOL_KEYS_RE_GLOBAL = new RegExp(
+  `\\b(?:${TOOL_KEY_LIST}|informefiscal|enviarmail)\\b`,
+  "gi"
+);
 
 /**
  * Deterministic engine tools: padrón A5 / rules engine, NO live browser

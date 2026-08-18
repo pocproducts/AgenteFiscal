@@ -412,16 +412,15 @@ export const translations = {
       },
       agentLaunch: {
         cuitLabel: "Taxpayer CUIT",
-        cuitPlaceholder: "20123456789",
+        cuitPlaceholder: "Enter the CUIT and choose the tools to run…",
         cuitInvalid: "CUIT must be 11 digits",
-        cuitHint: "Enter the CUIT, then pick a fiscal tool to run",
+        cuitHint: "Pick at least one fiscal tool to run",
         launching: "Starting a new chat with this agent…",
-        planTitle: "Execution plan",
-        planHint: "The following actions will run",
-        run: "Run",
-        cancel: "Cancel",
+        next: "Next",
         newProfile: "New profile",
         selectProfileHint: "Select a profile to enable the report actions",
+        multiToolsHint:
+          "Pick one or more fiscal tools — they run as a single consolidated report",
       },
       billingWidgets: {
         tokensLabel: "Tokens",
@@ -1304,18 +1303,16 @@ export const translations = {
       },
       agentLaunch: {
         cuitLabel: "CUIT del contribuyente",
-        cuitPlaceholder: "20123456789",
+        cuitPlaceholder: "Ingresá el CUIT y elegí las herramientas para ejecutar…",
         cuitInvalid: "El CUIT debe tener 11 dígitos",
-        cuitHint:
-          "Ingresá el CUIT y elegí una herramienta fiscal para ejecutar",
+        cuitHint: "Elegí al menos una herramienta fiscal para ejecutar",
         launching: "Iniciando un chat nuevo con este agente…",
-        planTitle: "Plan de ejecución",
-        planHint: "Se van a ejecutar las siguientes acciones",
-        run: "Ejecutar",
-        cancel: "Cancelar",
+        next: "Siguiente",
         newProfile: "Nuevo perfil",
         selectProfileHint:
           "Seleccioná un perfil para habilitar las acciones de reporte",
+        multiToolsHint:
+          "Elegí una o varias herramientas fiscales: se ejecutan como un único reporte consolidado",
       },
       billingWidgets: {
         tokensLabel: "Tokens",

@@ -339,10 +339,11 @@ export async function markChatMailSent({
         if (
           part?.type === "text" &&
           typeof part.text === "string" &&
-          part.text.includes("[MAIL_INPUT_REPLACEMENT]")
+          (part.text.includes("[MAIL_INPUT_REPLACEMENT]") ||
+            part.text.includes("[MAIL_INPUT_REPLACEMENT:"))
         ) {
-          part.text = part.text.replaceAll(
-            "[MAIL_INPUT_REPLACEMENT]",
+          part.text = part.text.replace(
+            /\[MAIL_INPUT_REPLACEMENT(?::[A-Za-z0-9_-]+)?\]/g,
             `[MAIL_SENT:${email}]`
           );
           changed = true;

@@ -14,17 +14,20 @@ export const MailSentStatus = ({ email }: { email: string }) => (
 
 export const MailInputComponent = (props: {
   chatId?: string;
+  pdfFile?: string;
   onSent?: (email: string) => void;
 }) => {
-  const { chatId, onSent } = props;
+  const { chatId, pdfFile, onSent } = props;
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent">("idle");
+  const [error, setError] = useState<string | null>(null);
 
   const handleSend = async () => {
     if (!email.includes("@") || status !== "idle") {
       return;
     }
     setStatus("sending");
+    setError(null);
     try {
       if (chatId) {
         const res = await fetch(
@@ -32,19 +35,35 @@ export const MailInputComponent = (props: {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email }),
+            body: JSON.stringify({ email, pdfFile }),
           }
         );
         if (!res.ok) {
-          throw new Error("mail-send-failed");
+          let cause =
+            "El envío del email falló. Intenta de nuevo en unos minutos.";
+          try {
+            const body = (await res.json()) as {
+              cause?: string;
+              message?: string;
+            };
+            cause = body.cause ?? body.message ?? cause;
+          } catch {
+            // Non-JSON error body: keep the default message.
+          }
+          throw new Error(cause);
         }
       } else {
         await new Promise((r) => setTimeout(r, 1000));
       }
       setStatus("sent");
       onSent?.(email);
-    } catch {
+    } catch (err) {
       setStatus("idle");
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : "El envío del email falló. Intenta de nuevo en unos minutos."
+      );
     }
   };
 
@@ -91,6 +110,15 @@ export const MailInputComponent = (props: {
       <p className="px-1 text-[11px] text-muted-foreground/60 italic">
         * El reporte consolidado se adjuntará automáticamente en formato PDF.
       </p>
+      {error ? (
+        <p
+          className="px-1 text-[11px] font-medium text-red-500"
+          data-testid="mail-input-error"
+          role="alert"
+        >
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 };

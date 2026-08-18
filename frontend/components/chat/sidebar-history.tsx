@@ -2,7 +2,7 @@
 
 import { isToday, isYesterday, subMonths, subWeeks } from "date-fns";
 import { motion } from "framer-motion";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import useSWRInfinite from "swr/infinite";
 import { toast } from "@/components/chat/toast";
@@ -118,10 +118,8 @@ export function SidebarHistory({ user }: { user: PanelUser | undefined }) {
     { fallbackData: [], revalidateOnFocus: false }
   );
 
-  const router = useRouter();
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-
   const hasReachedEnd = paginatedChatHistories
     ? paginatedChatHistories.some((page) => page.hasMore === false)
     : false;
@@ -132,13 +130,8 @@ export function SidebarHistory({ user }: { user: PanelUser | undefined }) {
 
   const handleDelete = () => {
     const chatToDelete = deleteId;
-    const isCurrentChat = pathname === `/chat/${chatToDelete}`;
 
     setShowDeleteDialog(false);
-
-    if (isCurrentChat) {
-      router.replace("/");
-    }
 
     mutate((chatHistories) => {
       if (chatHistories) {

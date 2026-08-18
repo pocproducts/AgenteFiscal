@@ -140,6 +140,12 @@ class ChatRequest(BaseModel):
 	model_config = ConfigDict(extra='forbid')
 
 	message: str = Field(description='Natural language query from the user')
+	tools: list[str] | None = Field(
+		default=None,
+		description='Explicit tool-keys to run as ONE consolidated pipeline '
+		'(bypasses detect()); any subset of TOOL_SPECS plus '
+		'"informefiscal" (all data tools) and "enviarmail" (send report)',
+	)
 	conversation_id: str | None = Field(
 		default=None,
 		description='Opaque conversation identifier (generated if omitted)',
@@ -803,6 +809,352 @@ def _handle_wizard_pipeline(
 		return {'error': str(exc)}
 
 
+# ── Multi-tool: consolidated pipeline (arbitrary subset) ──────────────────
+
+
+def _resolve_tool_flags(tools: list[str] | None) -> tuple[WizardTasks | None, set[str], bool]:
+	"""Mapea una lista de tool-keys a los flags del pipeline consolidado.
+
+	Returns:
+		``(tasks, deterministic, send_email)``:
+		- ``tasks``: ``WizardTasks`` con los flags booleanos de las tools de
+		  browser, resueltos desde ``TOOL_SPECS[key].task_flags`` (fuente única,
+		  sin hardcodear mapeos en otro lado). ``None`` si no hay tools.
+		- ``deterministic``: set de tools de motor determinista presentes
+		  (consultaarca / calendariovencimientosarca — no son flags de pipeline).
+		- ``send_email``: ``True`` cuando la selección incluye ``enviarmail``.
+	"""
+	if not tools:
+		return None, set(), False
+
+	keys = [k for k in tools if k]
+	flags = {'with_deuda': False, 'with_facilidades': False, 'with_registro': False, 'with_iibb': False}
+	deterministic: set[str] = set()
+
+	# ``informefiscal`` equivale a TODAS las tools de datos (reporte completo):
+	# los 4 flags de browser y los 2 motores deterministas.
+	if 'informefiscal' in keys:
+		flags = {k: True for k in flags}
+		deterministic = {'consultaarca', 'calendariovencimientosarca'}
+
+	for key in keys:
+		spec = TOOL_SPECS.get(key)
+		if spec is None:
+			continue
+		for flag, val in (spec.task_flags or {}).items():
+			if flag in flags:
+				flags[flag] = bool(val)
+		if not spec.needs_browser:
+			deterministic.add(key)
+
+	tasks = WizardTasks(
+		deuda=flags['with_deuda'],
+		facilidades=flags['with_facilidades'],
+		registro=flags['with_registro'],
+		iibb=flags['with_iibb'],
+	)
+	send_email = 'enviarmail' in keys
+	return tasks, deterministic, send_email
+
+
+def _mail_input_marker(pdf_path: object) -> str:
+	"""Build the ``[MAIL_INPUT_REPLACEMENT:<b64>]`` marker for a report PDF.
+
+	Encodes only the basename of the PDF (``Path.name``) with urlsafe base64
+	(no padding), same encoding family as the ``INFORME_FISCAL_BUTTON`` marker.
+	"""
+	import base64
+
+	filename = Path(str(pdf_path)).name
+	marker = base64.urlsafe_b64encode(filename.encode('utf-8')).decode('ascii').rstrip('=')
+	return f'[MAIL_INPUT_REPLACEMENT:{marker}]'
+
+
+# Flag WizardTasks → tool_key (action) y label para la respuesta consolidada.
+_PIPELINE_FLAG_TO_ACTION: dict[str, str] = {
+	'deuda': 'deudavencimientos',
+	'facilidades': 'misfacilidades',
+	'registro': 'sistemaregistral',
+	'iibb': 'rentascordoba',
+}
+
+_PIPELINE_FLAG_LABELS: dict[str, str] = {
+	'deuda': 'Deuda y vencimientos (ARCA)',
+	'facilidades': 'Mis Facilidades (ARCA)',
+	'registro': 'Sistema Registral (ARCA)',
+	'iibb': 'IIBB Córdoba (Rentas)',
+}
+
+#: Orden canónico de las tools de browser en la respuesta consolidada.
+_PIPELINE_FLAG_ORDER: tuple[str, ...] = ('deuda', 'facilidades', 'registro', 'iibb')
+
+#: Orden de los motores deterministas en la respuesta consolidada.
+_DETERMINISTIC_ORDER: tuple[str, ...] = ('consultaarca', 'calendariovencimientosarca')
+
+
+def _handle_selected_tools_pipeline(
+	cuit: str,
+	tools: list[str],
+	echo_func: Callable[[str], None],
+) -> dict[str, Any]:
+	"""Ejecuta una selección arbitraria de tools como UN solo pipeline consolidado.
+
+	Las tools de browser (sistemaregistral / deudavencimientos / misfacilidades
+	/ rentascordoba) corren como una única ejecución de
+	``_procesar_cliente_pipeline`` con los flags resueltos desde ``TOOL_SPECS``
+	(reusa exactamente el machinery del wizard). Los motores deterministas
+	(consultaarca / calendariovencimientosarca) se ejecutan individualmente vía
+	``_run_engine_tool`` y sus resultados se mergean en el reply/data final.
+
+	Best-effort por tool: ninguna falla propaga excepción — los errores se
+	colectan en el reply y ``actions_taken`` solo marca las tools completadas.
+
+	Returns:
+		Dict compatible con ``ChatResponse``: ``{reply, data, actions_taken}``.
+	"""
+	tasks, deterministic, send_email = _resolve_tool_flags(tools)
+
+	data: dict[str, Any] = {}
+	actions_taken: list[str] = []
+	notes: list[str] = []
+	errors: list[str] = []
+	#: Pedido de dirección de email (marker) — se anexa SIEMPRE al final del reply.
+	email_prompt: str | None = None
+
+	# ── Pipeline consolidado de browser (una sola corrida) ───────────────
+	# Corre también cuando solo se pide enviarmail: el pipeline es la fuente
+	# del reporte que hay que enviar. Con solo tools deterministas no corre.
+	uses_pipeline = tasks is not None and (
+		tasks.deuda or tasks.facilidades or tasks.registro or tasks.iibb or send_email
+	)
+	if uses_pipeline:
+		pipeline = _handle_wizard_pipeline(cuit, tasks, echo_func, send_email=send_email)
+		if pipeline is None:
+			errors.append('No se pudo ejecutar el pipeline consolidado (credenciales ARCA no disponibles).')
+		else:
+			pipeline = _json_safe(pipeline)
+			data.update(pipeline)
+			if pipeline.get('error'):
+				errors.append(f'Pipeline consolidado: {pipeline["error"]}')
+			else:
+				for flag in _PIPELINE_FLAG_ORDER:
+					if getattr(tasks, flag):
+						actions_taken.append(_PIPELINE_FLAG_TO_ACTION[flag])
+						notes.append(f'✅ {_PIPELINE_FLAG_LABELS[flag]}')
+			if send_email:
+				actions_taken.append('send_email')
+				if pipeline.get('email'):
+					notes.append('✅ Email enviado al cliente')
+				elif pipeline.get('pdf_path'):
+					# El pedido de dirección va SIEMPRE como última línea del reply
+					# (email_prompt se anexa al final en la sección de reply).
+					email_prompt = (
+						'⚠️ Email no enviado (sin dirección configurada). Escribí la dirección para enviar el reporte: '
+						f'{_mail_input_marker(pipeline["pdf_path"])}'
+					)
+				else:
+					notes.append('⚠️ Email no enviado (sin dirección configurada o error en la extracción)')
+
+	# ── Motores deterministas (best-effort individual) ───────────────────
+	for key in _DETERMINISTIC_ORDER:
+		if key not in deterministic:
+			continue
+		spec = TOOL_SPECS[key]
+		resultado = _run_engine_tool(spec, cuit, echo_func)
+		if resultado and not resultado.get('error'):
+			data[key] = resultado
+			actions_taken.append(key)
+			notes.append(_resolve_formatter(spec.formatter_name)(resultado, cuit))
+		else:
+			detalle = (resultado or {}).get('detail') or (resultado or {}).get('error') or 'Error desconocido'
+			errors.append(f'⚠️ **{spec.tool_name}:** no se pudo consultar ({detalle})')
+
+	# ── Reply consolidado ────────────────────────────────────────────────
+	lines = [f'**Reporte consolidado — CUIT {cuit}**', '']
+	if notes:
+		lines.append('\n\n'.join(notes))
+	if errors:
+		lines.append('\n')
+		lines.append('### Consultas con errores')
+		lines.append('\n'.join(errors))
+	if not notes and not errors and not actions_taken:
+		lines.append('No se reconoció ninguna herramienta seleccionada.')
+
+	# El pedido de dirección del email va SIEMPRE al final del reply.
+	if email_prompt:
+		lines.append('\n')
+		lines.append(email_prompt)
+
+	return {'reply': '\n'.join(lines), 'data': data or None, 'actions_taken': actions_taken}
+
+
+async def _append_and_persist(
+	fastapi_request: Request,
+	conversation_id: str,
+	message: str,
+	reply: str,
+	tenant_id: object | None,
+	store: RedisStore | None,
+	*,
+	profile_id: UUID | None,
+) -> None:
+	"""Persiste user+assistant (Redis + Postgres) para los handlers multi-tool."""
+	if tenant_id and store is not None:
+		await store.append_messages(
+			tenant_id,
+			conversation_id,
+			[
+				{'role': 'user', 'content': message},
+				{'role': 'assistant', 'content': reply},
+			],
+		)
+	await _persist_conversation(
+		fastapi_request,
+		conversation_id,
+		[
+			{'role': 'user', 'content': message},
+			{'role': 'assistant', 'content': reply},
+		],
+		profile_id=profile_id,
+		status='done',
+	)
+
+
+async def _handle_multi_tool_message(
+	request: ChatRequest,
+	fastapi_request: Request,
+	cuit: str | None,
+	conversation_id: str,
+	tenant_id: object | None,
+	store: RedisStore | None,
+	message: str,
+) -> ChatResponse:
+	"""Dispatch no-streaming de una solicitud con ``tools`` explícito."""
+	if not cuit:
+		reply = 'Por favor, proporcioná un CUIT válido para realizar la consulta.'
+		await _append_and_persist(
+			fastapi_request,
+			conversation_id,
+			message,
+			reply,
+			tenant_id,
+			store,
+			profile_id=request.profile_id,
+		)
+		return ChatResponse(conversation_id=conversation_id, reply=reply, actions_taken=[])
+
+	result = await asyncio.to_thread(
+		_handle_selected_tools_pipeline,
+		cuit,
+		request.tools,
+		lambda _msg: None,  # sin superficie de progreso en el flujo no-stream
+	)
+	reply = result['reply']
+	await _append_and_persist(
+		fastapi_request,
+		conversation_id,
+		message,
+		reply,
+		tenant_id,
+		store,
+		profile_id=request.profile_id,
+	)
+	return ChatResponse(
+		conversation_id=conversation_id,
+		reply=reply,
+		actions_taken=result['actions_taken'],
+		data=result['data'],
+	)
+
+
+async def _chat_multi_tool_stream(
+	request: ChatRequest,
+	fastapi_request: Request,
+	cuit: str | None,
+	conversation_id: str,
+	tenant_id: object | None,
+	store: RedisStore | None,
+	message: str,
+) -> StreamingResponse:
+	"""SSE del pipeline consolidado multi-tool (mismo contrato que el wizard)."""
+	headers = {'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'}
+
+	if not cuit:
+		reply = 'Por favor, proporcioná un CUIT válido para realizar la consulta.'
+		await _append_and_persist(
+			fastapi_request,
+			conversation_id,
+			message,
+			reply,
+			tenant_id,
+			store,
+			profile_id=request.profile_id,
+		)
+		return StreamingResponse(_iter_sse_early(conversation_id, reply), media_type='text/event-stream', headers=headers)
+
+	queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+	_loop = asyncio.get_running_loop()
+	_progress_messages: list[str] = []
+
+	def _progress(msg: str) -> None:
+		_progress_messages.append(msg)
+		_loop.call_soon_threadsafe(queue.put_nowait, ('progress', msg))
+
+	async def _run():
+		try:
+			result = await asyncio.to_thread(
+				_handle_selected_tools_pipeline,
+				cuit,
+				request.tools,
+				_progress,
+			)
+			reply = result['reply']
+			await _append_and_persist(
+				fastapi_request,
+				conversation_id,
+				message,
+				reply,
+				tenant_id,
+				store,
+				profile_id=request.profile_id,
+			)
+			complete_payload: dict[str, Any] = {
+				'reply': reply,
+				'data': result['data'],
+				'actions_taken': result['actions_taken'],
+				'conversation_id': conversation_id,
+			}
+			if _progress_messages:
+				complete_payload['pipeline_steps'] = list(_progress_messages)
+			await queue.put(('complete', complete_payload))
+		except Exception as exc:
+			reply = f'Ocurrió un error al ejecutar las herramientas: {exc}'
+			await _append_and_persist(
+				fastapi_request,
+				conversation_id,
+				message,
+				reply,
+				tenant_id,
+				store,
+				profile_id=request.profile_id,
+			)
+			await queue.put(('complete', {'reply': reply, 'data': None, 'conversation_id': conversation_id}))
+
+	async def _generate():
+		yield f'event: conversation_start\ndata: {json.dumps({"conversation_id": conversation_id})}\n\n'
+		task = asyncio.create_task(_run())
+		while True:
+			event_type, payload = await queue.get()
+			if event_type == 'progress':
+				yield f'event: progress\ndata: {json.dumps({"message": payload})}\n\n'
+			elif event_type == 'complete':
+				yield f'event: complete\ndata: {json.dumps(payload)}\n\n'
+				break
+		await task
+
+	return StreamingResponse(_generate(), media_type='text/event-stream', headers=headers)
+
+
 # ── Wizard endpoint ─────────────────────────────────────────────────────
 
 
@@ -1078,6 +1430,18 @@ async def chat_message_stream(
 
 	# 1. Detect intent + extract CUIT (with history context)
 	intent, cuit, _params = detect(context)
+
+	# 1b. Explicit multi-tool request: bypass detect() — run a consolidated pipeline.
+	if request.tools:
+		return await _chat_multi_tool_stream(
+			request,
+			fastapi_request,
+			cuit,
+			conversation_id,
+			tenant_id,
+			store,
+			message,
+		)
 
 	# 2-3. Early returns for invalid/no-intent (same as regular endpoint)
 	if not cuit and intent != Intent.UNKNOWN:
@@ -1514,6 +1878,18 @@ async def chat_message(
 	# 1. Detect intent + extract CUIT (with history context)
 	intent, cuit, _params = detect(context)
 
+	# 1b. Explicit multi-tool request: bypass detect() — run a consolidated pipeline.
+	if request.tools:
+		return await _handle_multi_tool_message(
+			request,
+			fastapi_request,
+			cuit,
+			conversation_id,
+			tenant_id,
+			store,
+			message,
+		)
+
 	# 2. No CUIT found
 	if not cuit and intent != Intent.UNKNOWN:
 		reply = 'Por favor, proporcioná un CUIT válido para realizar la consulta.'
@@ -1701,3 +2077,106 @@ async def download_report(
 		return FileResponse(local_path, media_type='application/pdf', filename=local_path.name)
 
 	raise HTTPException(status_code=404, detail='Archivo no encontrado')
+
+
+# ── Send report by email (mail input flow) ──────────────────────────────────
+
+
+class SendReportEmailRequest(BaseModel):
+	"""Body for ``POST /v1/chat/reports/send`` — user-provided recipient."""
+
+	model_config = ConfigDict(extra='forbid')
+
+	email_address: str = Field(description='Email del destinatario', examples=['ana@acme.io'])
+	pdf_path: str = Field(description='Nombre o ruta del archivo PDF del reporte a enviar')
+
+
+# Local fallback for ``/app/output``: where PdfGenerator writes by default
+# (``agente_fiscal/storage/calendarios``), same location the GET download
+# endpoint serves from in non-Docker setups.
+_REPORTS_STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / 'storage' / 'calendarios'
+
+
+def _resolve_report_pdf(filename: str) -> Path | None:
+	"""Resolve a report PDF filename to an existing file (traversal-safe).
+
+	Only ``Path(filename).name`` is ever used, so absolute paths and ``..``
+	can never escape the allowed report directories. Searches ``/app/output``
+	first and falls back to ``storage/calendarios`` (mirrors the GET
+	``/v1/chat/reports/{filename}`` availability).
+	"""
+	name = Path(filename).name
+	if not name:
+		return None
+	for base in (REPORTS_DIR, _REPORTS_STORAGE_DIR):
+		base_resolved = base.resolve()
+		candidate = (base_resolved / name).resolve()
+		try:
+			candidate.relative_to(base_resolved)
+		except ValueError:
+			continue
+		if candidate.is_file():
+			return candidate
+	return None
+
+
+@router.post(
+	'/v1/chat/reports/send',
+	summary='Enviar reporte PDF por email al destinatario indicado',
+)
+async def send_report_email(body: SendReportEmailRequest) -> dict[str, object]:
+	"""Send an existing report PDF to a user-provided email address via Resend.
+
+	The file must exist under ``/app/output`` or ``storage/calendarios`` (the
+	same locations the GET download endpoint resolves). Outbound failures of
+	the Resend API are surfaced as structured errors (never propagated as
+	exceptions) so the client can display the cause and let the user retry.
+	"""
+	from datetime import datetime
+
+	from agente_fiscal.adapters.resend_email import ResendEmailSender
+	from agente_fiscal.api.routes.clients import _EMAIL_RE, _invalid_email
+	from agente_fiscal.config import get_settings
+	from agente_fiscal.domain.models import ClientConfig
+
+	if not _EMAIL_RE.fullmatch(body.email_address):
+		raise _invalid_email()
+
+	pdf = _resolve_report_pdf(body.pdf_path)
+	if pdf is None:
+		raise HTTPException(
+			status_code=404,
+			detail=UnifiedResponse(
+				status='error',
+				error=ApiError(code='REPORT_NOT_FOUND', cause='Archivo del reporte no encontrado'),
+			).model_dump(),
+		)
+
+	settings = get_settings()
+	api_key = getattr(settings, 'resend_api_key', '')
+	from_addr = getattr(settings, 'email_from', '')
+	if not api_key or not from_addr:
+		raise HTTPException(
+			status_code=503,
+			detail=UnifiedResponse(
+				status='error',
+				error=ApiError(code='EMAIL_NOT_CONFIGURED', cause='Servicio de email no configurado'),
+			).model_dump(),
+		)
+
+	sender = ResendEmailSender(api_key=api_key, from_addr=from_addr)
+	# ResendEmailSender uses cliente.email (recipient) + cliente.nombre/cuit as
+	# name placeholder only; an empty cuit/nombre does not break the send.
+	cliente = ClientConfig(cuit='', email=body.email_address)
+	now = datetime.utcnow()
+	ok = sender.enviar(cliente, pdf, now.month, now.year)
+	if not ok:
+		raise HTTPException(
+			status_code=502,
+			detail=UnifiedResponse(
+				status='error',
+				error=ApiError(code='EMAIL_SEND_FAILED', cause='El envío del email falló (servicio de email). Intentá de nuevo.'),
+			).model_dump(),
+		)
+
+	return {'sent': True, 'email': body.email_address}

@@ -7,7 +7,7 @@ import {
 import {
   AGENT_SESSION_WINDOW_MS,
   NO_MONITOR_TOOLS,
-  TOOL_KEY_RE,
+  TOOL_KEYS_RE_GLOBAL,
   TOOL_NAMES,
   TOOL_WINDOW_OVERRIDES,
 } from "@/lib/agent-window";
@@ -232,25 +232,70 @@ export async function POST(request: Request) {
           // deterministic engines (consultaarca / calendariovencimientosarca)
           // go through the generic backend chat path below — they must NOT
           // open the agent monitor.
-          const toolMatch = userText.match(TOOL_KEY_RE);
-          const toolKey = toolMatch ? toolMatch[0].toLowerCase() : null;
-          const isToolCommand = Boolean(toolKey && TOOL_NAMES[toolKey]);
-          const isNoMonitorTool = Boolean(
-            toolKey &&
-              (NO_MONITOR_TOOLS as readonly string[]).includes(toolKey)
+          // Multi-tool: parse EVERY tool token in the message (not just the
+          // first). When `tools` is forwarded, the backend bypasses its
+          // single-intent detect() and runs the selection as ONE consolidated
+          // pipeline. Single-tool messages behave exactly like before.
+          const toolKeys = [
+            ...new Set(
+              (userText.match(TOOL_KEYS_RE_GLOBAL) ?? []).map((m) =>
+                m.toLowerCase()
+              )
+            ),
+          ];
+          const hasToolCommand = toolKeys.length > 0;
+          const selectedBrowserTools = toolKeys.filter(
+            (k): k is string =>
+              Boolean(TOOL_NAMES[k]) &&
+              !(NO_MONITOR_TOOLS as readonly string[]).includes(k)
           );
+          // `informefiscal` means ALL data tools (incl. browser); `enviarmail`
+          // alone is a pure send action and never opens the agent monitor.
+          const opensMonitor =
+            toolKeys.includes("informefiscal") ||
+            selectedBrowserTools.length > 0;
+          // Deterministic engines already reply with rich markdown, so skip the
+          // verbose raw data dump for them exactly like today.
+          const suppressJsonDump =
+            hasToolCommand &&
+            !toolKeys.includes("informefiscal") &&
+            toolKeys.every(
+              (k) =>
+                (NO_MONITOR_TOOLS as readonly string[]).includes(k) ||
+                k === "enviarmail"
+            );
 
-          if (isToolCommand && toolKey && !isNoMonitorTool) {
+          if (hasToolCommand && opensMonitor) {
             // ── Browser tool: real backend wiring (Route BFF → /v1/chat/message/stream) ──
             // The backend runs the real automation (ComposioBrowser o motor
             // determinista según ToolSpec) and returns the tool data (incl.
             // live_url) + a formatted markdown reply. We map that into the
             // agent-sidebar SSE events the UI already consumes.
             // Tool window (used in session-start AND the remaining-window wait).
-            const windowMs =
-              TOOL_WINDOW_OVERRIDES[toolKey] ?? AGENT_SESSION_WINDOW_MS;
+            // ONE consolidated session for the whole selection: `informefiscal`
+            // (implies every data tool) names the session; otherwise the first
+            // selected browser tool. Window = the LONGEST selected browser
+            // window, so the UI never closes before the pipeline finishes.
+            const windowCandidateKeys = toolKeys.includes("informefiscal")
+              ? [
+                  "sistemaregistral",
+                  "deudavencimientos",
+                  "misfacilidades",
+                  "rentascordoba",
+                ]
+              : selectedBrowserTools;
+            const windowMs = Math.max(
+              ...windowCandidateKeys.map(
+                (k) => TOOL_WINDOW_OVERRIDES[k] ?? AGENT_SESSION_WINDOW_MS
+              )
+            );
             const agentId = generateId();
-            const toolName = TOOL_NAMES[toolKey];
+            const toolKey = toolKeys.includes("informefiscal")
+              ? "informefiscal"
+              : selectedBrowserTools[0];
+            const toolName = toolKeys.includes("informefiscal")
+              ? "InformeFiscal"
+              : (TOOL_NAMES[toolKey] ?? "Fiscal");
 
             // 1) Open the agent monitor immediately (optimistic) so the sidebar
             //    appears the instant the command fires, while the backend runs.
@@ -286,6 +331,7 @@ export async function POST(request: Request) {
                     conversation_id: id,
                     history: history.length ? history : null,
                     profile_id: activeProfileId ?? undefined,
+                    tools: hasToolCommand ? toolKeys : undefined,
                   },
                   timeoutMs: 600_000,
                 }
@@ -491,6 +537,7 @@ export async function POST(request: Request) {
                 // REPORT_PROFILE_REQUIRED otherwise). Forward what the client
                 // sent (camelCase → profile_id) and never drop it.
                 profile_id: activeProfileId ?? undefined,
+                tools: hasToolCommand ? toolKeys : undefined,
               },
               timeoutMs: 60_000,
             });
@@ -499,7 +546,7 @@ export async function POST(request: Request) {
             if (
               res.data &&
               typeof res.data === "object" &&
-              !isNoMonitorTool
+              !suppressJsonDump
             ) {
               // Keep raw structured results visible for debugging.
               assistantText += `\n\n<details><summary>Datos</summary>\n\n\`\`\`json\n${JSON.stringify(res.data, null, 2)}\n\`\`\`\n\n</details>`;

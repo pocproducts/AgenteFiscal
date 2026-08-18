@@ -25,6 +25,20 @@ import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
 import { Weather } from "./weather";
 
+// Decode a urlsafe base64 (no padding) encoded report filename emitted by the
+// backend's [MAIL_INPUT_REPLACEMENT:<b64>] marker.
+function decodeMailPdfFilename(encoded: string): string | undefined {
+  try {
+    const standard = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(standard);
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    const name = new TextDecoder().decode(bytes);
+    return name.trim() ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const PurePreviewMessage = ({
   addToolApprovalResponse,
   chatId,
@@ -120,7 +134,7 @@ const PurePreviewMessage = ({
 
     if (type === "text") {
       const RE =
-        /(\[MAIL_INPUT_REPLACEMENT\]|\[MAIL_SENT:[^\]]+\]|\[INFORME_FISCAL_BUTTON:[A-Za-z0-9+/=]+\]|_(?:Agente trabajando en .*?\.\.\.)_)/g;
+        /(\[MAIL_INPUT_REPLACEMENT(?::[A-Za-z0-9_-]+)?\]|\[MAIL_SENT:[^\]]+\]|\[INFORME_FISCAL_BUTTON:[A-Za-z0-9+/=]+\]|_(?:Agente trabajando en .*?\.\.\.)_)/g;
       const fragments = part.text.split(RE);
 
       return (
@@ -143,8 +157,24 @@ const PurePreviewMessage = ({
                 .replace("]", "");
               return <MailSentStatus email={email} key="mail-sent" />;
             }
-            if (fragment === "[MAIL_INPUT_REPLACEMENT]") {
-              return <MailInputComponent chatId={chatId} key="mail-input" />;
+            if (
+              fragment === "[MAIL_INPUT_REPLACEMENT]" ||
+              fragment.startsWith("[MAIL_INPUT_REPLACEMENT:")
+            ) {
+              const encoded =
+                fragment === "[MAIL_INPUT_REPLACEMENT]"
+                  ? undefined
+                  : fragment.slice("[MAIL_INPUT_REPLACEMENT:".length, -1);
+              const pdfFile = encoded
+                ? decodeMailPdfFilename(encoded)
+                : undefined;
+              return (
+                <MailInputComponent
+                  chatId={chatId}
+                  pdfFile={pdfFile}
+                  key="mail-input"
+                />
+              );
             }
             if (fragment.startsWith("[INFORME_FISCAL_BUTTON:")) {
               const b64 = fragment
