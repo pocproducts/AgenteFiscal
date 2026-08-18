@@ -23,6 +23,7 @@ from agente_fiscal.adapters.browser import ComposioBrowser
 from agente_fiscal.db.models import ReportRun
 from agente_fiscal.domain.models import ClientConfig
 from agente_fiscal.pipeline.models import PipelineResult, ProposalOutcome
+from agente_fiscal.ports.browser import BrowserPort
 from agente_fiscal.worker.runner import ReportRunner, start_worker
 
 pytestmark = pytest.mark.usefixtures('db_reset')
@@ -319,21 +320,23 @@ async def test_build_browser_partial_creds_raises(monkeypatch) -> None:
 
 
 async def test_build_browser_with_creds(monkeypatch) -> None:
-    from agente_fiscal.config import REPRESENTANTE_CUIT
+    """The default provider (composio) resolves to a ComposioBrowser from settings.
 
-    monkeypatch.setattr(
-        runner_mod,
-        'get_settings',
-        lambda: SimpleNamespace(
-            browser_enabled=True,
-            credentials=SimpleNamespace(composio_api_key='composio-key', clave_fiscal='clave'),
-        ),
+    Public-contract checks only: isinstance against BrowserPort and the class,
+    plus settings-based assertions on the creds that drive the factory (no
+    private-attribute coupling).
+    """
+    settings = SimpleNamespace(
+        browser_enabled=True,
+        browser_provider='composio',
+        credentials=SimpleNamespace(composio_api_key='composio-key', clave_fiscal='clave'),
     )
+    monkeypatch.setattr(runner_mod, 'get_settings', lambda: settings)
     browser = _make_runner(None)._build_browser(needed=True)
     assert isinstance(browser, ComposioBrowser)
-    assert browser._api_key == 'composio-key'
-    assert browser._estudio_cuit == REPRESENTANTE_CUIT
-    assert browser._estudio_clave == 'clave'
+    assert isinstance(browser, BrowserPort)
+    assert settings.credentials.composio_api_key == 'composio-key'
+    assert settings.credentials.clave_fiscal == 'clave'
 
 
 async def test_build_browser_disabled_raises(monkeypatch) -> None:

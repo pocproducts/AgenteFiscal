@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AGENT_SESSION_WINDOW_MS,
+  NO_MONITOR_TOOLS,
   TOOL_KEY_RE,
   TOOL_NAMES,
   TOOL_WINDOW_OVERRIDES,
@@ -50,6 +51,24 @@ describe("TOOL_NAMES", () => {
     expect(TOOL_NAMES.calendariovencimientosarca).toBe(
       "CalendarioVencimientosArca"
     );
+  });
+});
+
+describe("NO_MONITOR_TOOLS (deterministic engines skip the agent monitor)", () => {
+  it("covers the deterministic engine tools", () => {
+    expect(NO_MONITOR_TOOLS).toContain("consultaarca");
+    expect(NO_MONITOR_TOOLS).toContain("calendariovencimientosarca");
+  });
+
+  it("excludes the four browser tools (they keep the monitor)", () => {
+    for (const key of [
+      "sistemaregistral",
+      "deudavencimientos",
+      "misfacilidades",
+      "rentascordoba",
+    ]) {
+      expect(NO_MONITOR_TOOLS).not.toContain(key);
+    }
   });
 });
 

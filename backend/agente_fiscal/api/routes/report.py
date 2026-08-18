@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agente_fiscal.api.deps import CERT_PATH, KEY_PATH, REPRESENTANTE_CUIT, get_db_session, get_engine, get_memory, get_pdf_gen, get_ta
 from agente_fiscal.api.profile_gate import validate_active_profile
 from agente_fiscal.adapters.arca_ws import consultar_cuit
-from agente_fiscal.config import get_settings
 from agente_fiscal.domain.models import (
 	ApiError,
 	ClientConfig,
@@ -180,6 +179,7 @@ async def report(
 	browser = None
 	usa_browser = request.with_deuda or request.with_facilidades or request.with_registro
 	if usa_browser:
+		from agente_fiscal.adapters.browser.provider import build_browser_provider
 		from agente_fiscal.features import integration_enabled
 
 		if not integration_enabled('browser'):
@@ -190,10 +190,8 @@ async def report(
 					cause='La integración de browser (Composio) está deshabilitada. Activá BROWSER_ENABLED=true para habilitarla',
 				),
 			)
-		creds = get_settings().credentials
-		composio_key = creds.composio_api_key
-		estudio_clave = creds.clave_fiscal
-		if not composio_key or not estudio_clave:
+		browser = build_browser_provider()
+		if browser is None:
 			return UnifiedResponse(
 				status='error',
 				error=ApiError(
@@ -201,13 +199,6 @@ async def report(
 					cause='Falta COMPOSIO_API_KEY o ESTUDIO_CLAVE_FISCAL en .env',
 				),
 			)
-		from agente_fiscal.adapters.browser import ComposioBrowser
-
-		browser = ComposioBrowser(
-			composio_api_key=composio_key,
-			estudio_cuit=REPRESENTANTE_CUIT,
-			estudio_clave=estudio_clave,
-		)
 
 	memory = get_memory()
 	svc = PipelineService(engine, pdf_gen, memory)

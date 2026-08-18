@@ -11,6 +11,7 @@ import os
 import pickle
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -52,6 +53,16 @@ def _get_arca_proxies() -> dict[str, str] | None:
 NS_SOAP = 'http://schemas.xmlsoap.org/soap/envelope/'
 NS_WSU = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd'
 NS_PADRON = 'http://a5.soap.ws.server.puc.sr/'
+
+
+class PadronNotFoundError(RuntimeError):
+	"""El CUIT consultado no figura en el padrón ARCA.
+
+	ARCA responde HTTP 500 con un SOAP Fault ``No existe persona con ese Id``
+	cuando el CUIT no existe (o está dado de baja). Se eleva esta excepción de
+	dominio para que los handlers la mapeen a ``TAXPAYER_NOT_FOUND`` en vez de
+	filtrar el 500 crudo al usuario.
+	"""
 
 
 # ─── WSAA: Ticket de Acceso ────────────────────────────────────────────────
@@ -291,6 +302,23 @@ def _build_padron_soap(cuit_representante: str, token: str, sign: str, cuit_cons
 def _ns(tag: str) -> str:
 	"""Wrap tag in A5 namespace for ElementTree lookups."""
 	return f'{{{NS_PADRON}}}{tag}'
+
+
+def _parse_soap_fault(xml: str) -> Optional[str]:
+	"""Extract ``faultstring`` from a SOAP Fault body, if present.
+
+	ARCA responde los errores de negocio del padrón como HTTP 500 con un
+	``<soap:Fault>`` en el body (p.ej. ``No existe persona con ese Id``).
+	Devuelve ``None`` si el body no es XML o no trae faultstring.
+	"""
+	try:
+		root = ET.fromstring(xml)
+	except ET.ParseError:
+		return None
+	for elem in root.iter():
+		if elem.tag.split('}')[-1] == 'faultstring' and elem.text and elem.text.strip():
+			return elem.text.strip()
+	return None
 
 
 def _parse_int(val: Optional[str]) -> Optional[int]:
@@ -827,20 +855,44 @@ def consultar_cuit(
 	cuit_representante: str,
 	url: str = PADRON_A5_URL,
 ) -> PadronA5Result:
-	"""Consultar datos de un CUIT en el padrón ARCA A5."""
+	"""Consultar datos de un CUIT en el padrón ARCA A5.
+
+	Comportamiento:
+	- HTTP 500 con SOAP Fault ``No existe persona con ese Id`` → se eleva
+	  ``PadronNotFoundError`` (dominio), no el 500 crudo.
+	- HTTP 500 con otro fault → ``HTTPError`` con el mensaje del fault.
+	- Errores de conexión transitorios (reset/timeout) → un reintento acotado
+	  con backoff corto, porque ARCA suele fallar una vez y responder en la
+	  segunda (comportamiento observado en producción).
+	"""
 	soap = _build_padron_soap(cuit_representante, token, sign, cuit_consulta)
-	resp = requests.post(
-		url,
-		data=soap.encode('utf-8'),
-		headers={
-			'Content-Type': 'text/xml;charset=UTF-8',
-			'SOAPAction': '',
-		},
-		timeout=30,
-		proxies=_get_arca_proxies(),
-	)
-	resp.raise_for_status()
-	return PadronA5Result(resp.text)
+	last_conn_error: Optional[Exception] = None
+	for attempt in range(2):  # intento inicial + 1 retry acotado
+		try:
+			resp = requests.post(
+				url,
+				data=soap.encode('utf-8'),
+				headers={
+					'Content-Type': 'text/xml;charset=UTF-8',
+					'SOAPAction': '',
+				},
+				timeout=30,
+				proxies=_get_arca_proxies(),
+			)
+			if resp.status_code == 500:
+				fault = _parse_soap_fault(resp.text)
+				if fault and 'no existe persona' in fault.lower():
+					raise PadronNotFoundError(fault)
+				if fault:
+					raise requests.exceptions.HTTPError(f'ARCA respondió 500: {fault}', response=resp)
+			resp.raise_for_status()
+			return PadronA5Result(resp.text)
+		except (requests.exceptions.ConnectionError, requests.exceptions.ConnectTimeout) as exc:
+			# Transitorio (reset/timeout): una sola reintento, no reintentar errores HTTP 5xx.
+			last_conn_error = exc
+			if attempt < 1:
+				time.sleep(0.5)
+	raise last_conn_error  # type: ignore[misc]
 
 
 # ─── Helper de alto nivel ──────────────────────────────────────────────────

@@ -18,7 +18,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-from agente_fiscal.config import CERT_DIR, CERT_PATH, KEY_PATH, REPRESENTANTE_CUIT, get_settings
+from agente_fiscal.config import CERT_DIR, CERT_PATH, KEY_PATH, REPRESENTANTE_CUIT
 from agente_fiscal.pipeline.service import PipelineService, _completar_cliente_desde_padron
 import typer
 import yaml
@@ -28,6 +28,7 @@ from agente_fiscal.adapters.email_sender import EmailSender
 from agente_fiscal.adapters.memory import FiscalMemoryClient
 from agente_fiscal.domain.models import AppConfig, ClientConfig, TipoContribuyente, TipoPersona
 from agente_fiscal.adapters.pdf_generator import PdfGenerator
+from agente_fiscal.ports.browser import BrowserPort
 from agente_fiscal.domain.rules_engine import RulesEngine
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ def _procesar_cliente_pipeline(
 	pdf_gen: PdfGenerator,
 	mes: int,
 	anio: int,
-	browser: Optional[ComposioBrowser] = None,
+	browser: Optional[BrowserPort] = None,
 	with_deuda: bool = False,
 	with_facilidades: bool = False,
 	with_registro: bool = False,
@@ -345,17 +346,15 @@ def run(
 		logger.warning('[memory] Engram not reachable at %s', memory.config.engram_url)
 	typer.echo()
 
-	# 0b. Early validation for browser flags
+	# 0b. Early validation + init for browser flags
 	usa_browser = with_deuda or with_facilidades or with_registro or with_iibb
+	browser = None
 	if usa_browser:
-		creds = get_settings().credentials
-		composio_api_key = creds.composio_api_key
-		if not composio_api_key:
-			typer.echo('❌ COMPOSIO_API_KEY no configurada en .env')
-			raise typer.Exit(1)
-		estudio_clave = creds.clave_fiscal
-		if not estudio_clave:
-			typer.echo('❌ ESTUDIO_CLAVE_FISCAL no configurada en .env')
+		from agente_fiscal.adapters.browser.provider import build_browser_provider
+
+		browser = build_browser_provider(headed=headed)
+		if browser is None:
+			typer.echo('❌ Browser no disponible: BROWSER_ENABLED=false o credenciales faltantes en .env')
 			raise typer.Exit(1)
 
 	# 1. Load config
@@ -377,18 +376,6 @@ def run(
 	token, sign = get_ta()
 	typer.echo(f'TA vigente: {token[:40]}...')
 	typer.echo()
-
-	# 5. Init browser (deferred import — solo si --with-deuda o --with-facilidades)
-	browser = None
-	if usa_browser:
-		from agente_fiscal.adapters.browser import ComposioBrowser
-
-		browser = ComposioBrowser(
-			composio_api_key=composio_api_key,
-			estudio_cuit=REPRESENTANTE_CUIT,
-			estudio_clave=estudio_clave,
-			headed=headed,
-		)
 
 	# 6. Process each client
 	resultados: list[dict] = []
@@ -461,31 +448,17 @@ def deuda(
 	raw = yaml.safe_load(config_path.read_text())
 	config = AppConfig(**raw)
 
-	creds = get_settings().credentials
-	estudio_clave = creds.clave_fiscal
-	if not estudio_clave:
-		typer.echo('❌ ESTUDIO_CLAVE_FISCAL no configurada en .env')
-		raise typer.Exit(1)
-
 	# ═══════════════════════════════════════════════════════════════════
 	# Browser provider — intercambiable
 	# Hoy: ComposioBrowser (Composio Browser Tool vía REST API)
 	# ═══════════════════════════════════════════════════════════════════
-	composio_api_key = creds.composio_api_key
-	if not composio_api_key:
-		typer.echo('❌ COMPOSIO_API_KEY no configurada en .env')
-		typer.echo('   Obtenela en https://dashboard.composio.dev/settings')
-		raise typer.Exit(1)
-
-	from agente_fiscal.adapters.browser import ComposioBrowser
+	from agente_fiscal.adapters.browser.provider import build_browser_provider
 
 	deuda_resultados: list[dict] = []
-	extractor = ComposioBrowser(
-		composio_api_key=composio_api_key,
-		estudio_cuit=REPRESENTANTE_CUIT,
-		estudio_clave=estudio_clave,
-		headed=headed,
-	)
+	extractor = build_browser_provider(headed=headed)
+	if extractor is None:
+		typer.echo('❌ Browser no disponible: BROWSER_ENABLED=false o credenciales faltantes en .env')
+		raise typer.Exit(1)
 	try:
 		outputs = asyncio.run(extractor.run_all(config.clientes))
 		nombres = {c.cuit: c.nombre for c in config.clientes}
@@ -738,18 +711,14 @@ def report(
 
 	usa_browser = any(tasks.values())
 
-	# 5. Validar entorno si usa browser
-	composio_api_key = ''
-	estudio_clave = ''
+	# 5. Validar entorno + init browser si usa browser
+	browser = None
 	if usa_browser:
-		creds = get_settings().credentials
-		composio_api_key = creds.composio_api_key
-		if not composio_api_key:
-			typer.echo('❌ COMPOSIO_API_KEY no configurada en .env')
-			raise typer.Exit(1)
-		estudio_clave = creds.clave_fiscal
-		if not estudio_clave:
-			typer.echo('❌ ESTUDIO_CLAVE_FISCAL no configurada en .env')
+		from agente_fiscal.adapters.browser.provider import build_browser_provider
+
+		browser = build_browser_provider(headed=headed)
+		if browser is None:
+			typer.echo('❌ Browser no disponible: BROWSER_ENABLED=false o credenciales faltantes en .env')
 			raise typer.Exit(1)
 
 	# 6. Verificar certificados
@@ -765,18 +734,6 @@ def report(
 
 	# 8. Init engine
 	engine = RulesEngine()
-
-	# 9. Init browser si necesario
-	browser = None
-	if usa_browser:
-		from agente_fiscal.adapters.browser import ComposioBrowser
-
-		browser = ComposioBrowser(
-			composio_api_key=composio_api_key,
-			estudio_cuit=REPRESENTANTE_CUIT,
-			estudio_clave=estudio_clave,
-			headed=headed,
-		)
 
 	# 10. Output dir con fecha
 	periodo_str = f'{anio:04d}-{mes:02d}'

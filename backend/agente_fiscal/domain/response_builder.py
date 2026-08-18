@@ -251,6 +251,16 @@ def format_registro(registro: Optional[RegistroOutput], cuit: str) -> str:
 # existentes. Estilo espejo de ``format_registro_response`` (chat.py).
 
 
+# Códigos de motor conocidos → motivo amigable en español (sin códigos internos
+# ni detalles crudos tipo "500 Server Error ..." que asustan al usuario).
+_FRIENDLY_TOOL_ERRORS: dict[str, str] = {
+	'TAXPAYER_NOT_FOUND': 'El CUIT no figura en el padrón de ARCA',
+	'TA_UNAVAILABLE': 'ARCA no autenticó la consulta (no se obtuvo el ticket WSAA)',
+	'TAXPAYER_QUERY_FAILED': 'ARCA no respondió la consulta al padrón',
+	'CALENDAR_FAILED': 'No se pudo calcular el calendario de vencimientos',
+}
+
+
 def _error_reply(data: dict[str, Any] | None, cuit: str, tool_label: str) -> str | None:
 	"""Devuelve la respuesta corta de error si no hay datos o vienen con error."""
 	if data is None:
@@ -262,6 +272,8 @@ def _error_reply(data: dict[str, Any] | None, cuit: str, tool_label: str) -> str
 	label = f'No pude consultar {tool_label} para el CUIT {cuit}.'
 	if err == 'BROWSER_ERROR':
 		return f'{label}\n\n**Motivo:** Error de conexión'
+	if err in _FRIENDLY_TOOL_ERRORS:
+		return f'{label}\n\n**Motivo:** {_FRIENDLY_TOOL_ERRORS[err]}'
 	detail = data.get('detail') or 'Error desconocido'
 	return f'{label}\n\n**Motivo:** `{err}` — {detail}'
 
@@ -409,9 +421,11 @@ def format_rentas_response(data: dict[str, Any] | None, cuit: str) -> str:
 def format_consultaarca_response(data: dict[str, Any] | None, cuit: str) -> str:
 	"""Formatea la consulta al padrón A5 (determinista, sin browser).
 
-	Renderiza la sección **Obligaciones** (keys del mock TS `ejecutarConsultaArca`
-	o los impuestos del padrón ``impuestos_rg``/``impuestos_mt``) más los datos
-	básicos del contribuyente.
+	Renderiza los datos del contribuyente en renglones separados y legibles
+	en la UI: identidad, condición fiscal, domicilio, actividades registradas,
+	obligaciones (impuestos) y datos de monotributo/sociedad cuando aplican.
+	También soporta el shape del mock TS ``ejecutarConsultaArca``
+	(``obligaciones[].impuesto/codigo/estado``).
 	"""
 	error = _error_reply(data, cuit, 'el padrón ARCA')
 	if error:
@@ -429,26 +443,56 @@ def format_consultaarca_response(data: dict[str, Any] | None, cuit: str) -> str:
 	if denominacion:
 		lines.append(f'- **Denominación:** {denominacion}')
 
+	tipo_persona = data.get('tipo_persona')
+	if tipo_persona:
+		label = 'Jurídica' if tipo_persona == 'juridica' else 'Física'
+		lines.append(f'- **Tipo de persona:** {label}')
+
 	tipo = data.get('tipo')
 	if tipo:
-		lines.append(f'- **Condición frente al IVA:** {tipo}')
+		_tipo_map = {
+			'responsable_inscripto': 'Responsable Inscripto',
+			'monotributo': 'Monotributo',
+			'autonomo': 'Autónomo',
+		}
+		lines.append(f'- **Condición frente al IVA:** {_tipo_map.get(tipo, tipo)}')
 
 	estado = data.get('estado') or data.get('estado_clave')
 	if estado:
 		lines.append(f'- **Estado de la clave:** {estado}')
 
+	provincia = data.get('provincia')
+	if provincia:
+		lines.append(f'- **Provincia:** {provincia}')
+
 	dom = data.get('domicilio_fiscal')
 	if isinstance(dom, dict):
-		partes = [dom.get('direccion'), dom.get('localidad'), dom.get('ciudad'), dom.get('provincia')]
+		partes = [
+			dom.get('direccion'),
+			dom.get('localidad'),
+			dom.get('ciudad'),
+			dom.get('descripcionProvincia') or dom.get('provincia'),
+		]
 		if dom.get('codPostal'):
 			partes.append(f"CP {dom.get('codPostal')}")
 		domicilio = ', '.join(p for p in partes if p)
 		if domicilio:
 			lines.append(f'- **Domicilio fiscal:** {domicilio}')
 
+	# Actividades económicas registradas (hasta 3, en orden del padrón).
+	actividades = data.get('actividades') or []
+	if actividades:
+		lines.append('- **Actividades registradas:**')
+		for a in actividades[:3]:
+			cod = a.get('idActividad') or a.get('codigo') or ''
+			desc = a.get('descripcionActividad') or a.get('descripcion') or ''
+			line = f'  - {desc}' + (f' (`{cod}`)' if cod else '')
+			lines.append(line)
+
 	# Obligaciones: shape del mock TS (obligaciones[].impuesto/codigo/estado) o
 	# los impuestos del padrón (impuestos_rg + impuestos_mt).
 	obligaciones = data.get('obligaciones')
+	mostro_obligaciones = False
 	if isinstance(obligaciones, list) and obligaciones:
 		lines.append('- **Obligaciones:**')
 		for ob in obligaciones[:12]:
@@ -458,6 +502,7 @@ def format_consultaarca_response(data: dict[str, Any] | None, cuit: str) -> str:
 				if str(x).strip()
 			)
 			lines.append(f'  - {item}')
+		mostro_obligaciones = True
 	else:
 		impuestos = (data.get('impuestos_rg') or []) + (data.get('impuestos_mt') or [])
 		if impuestos:
@@ -466,8 +511,24 @@ def format_consultaarca_response(data: dict[str, Any] | None, cuit: str) -> str:
 				desc = imp.get('descripcionImpuesto') or imp.get('idImpuesto') or 'Impuesto'
 				est = imp.get('estadoImpuesto') or ''
 				lines.append(f'  - {desc}' + (f' — {est}' if est else ''))
+			mostro_obligaciones = True
 
-	if not denominacion and not obligaciones and not (data.get('impuestos_rg') or data.get('impuestos_mt')):
+	# Categoría de monotributo (si el contribuyente es monotributista).
+	cat_mt = data.get('categoria_monotributo')
+	if isinstance(cat_mt, dict) and cat_mt.get('descripcionCategoria'):
+		lines.append(f"- **Categoría monotributo:** {cat_mt.get('descripcionCategoria')}")
+
+	# Componentes de sociedad (socios/administradores, hasta 5).
+	componentes = data.get('componentes_sociedad') or []
+	if componentes:
+		lines.append('- **Componentes de sociedad:**')
+		for c in componentes[:5]:
+			nombre = c.get('apellidoYNombre') or c.get('denominacion') or c.get('idPersona') or ''
+			tipo_comp = c.get('tipoComponente') or ''
+			line = '  - ' + ' — '.join(str(x) for x in [nombre, tipo_comp] if str(x).strip())
+			lines.append(line)
+
+	if not denominacion and not mostro_obligaciones and not actividades:
 		lines.append('No se encontraron datos para el CUIT consultado.')
 
 	lines.append('')

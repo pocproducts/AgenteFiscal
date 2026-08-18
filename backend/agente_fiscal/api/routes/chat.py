@@ -288,7 +288,6 @@ def _handle_reporte(cuit: str) -> dict[str, Any] | None:
 
 	from agente_fiscal.api.deps import REPRESENTANTE_CUIT, get_engine, get_memory, get_pdf_gen, get_ta
 	from agente_fiscal.cli import _procesar_cliente_pipeline
-	from agente_fiscal.config import get_settings
 	from agente_fiscal.domain.models import ClientConfig
 	from agente_fiscal.pipeline.service import PipelineService, _completar_cliente_desde_padron
 
@@ -309,22 +308,14 @@ def _handle_reporte(cuit: str) -> dict[str, Any] | None:
 	pdf_gen = get_pdf_gen()
 	memory = get_memory()
 
-	creds = get_settings().credentials
-	browser = None
-	with_browser = bool(creds.composio_api_key and creds.clave_fiscal)
+	from agente_fiscal.adapters.browser.provider import build_browser_provider
+	from agente_fiscal.features import IntegrationDisabledError, integration_enabled
 
-	if with_browser:
-		from agente_fiscal.adapters.browser import ComposioBrowser
-		from agente_fiscal.features import IntegrationDisabledError, integration_enabled
+	if not integration_enabled('browser'):
+		raise IntegrationDisabledError('browser')
 
-		if not integration_enabled('browser'):
-			raise IntegrationDisabledError('browser')
-
-		browser = ComposioBrowser(
-			composio_api_key=creds.composio_api_key,
-			estudio_cuit=REPRESENTANTE_CUIT,
-			estudio_clave=creds.clave_fiscal,
-		)
+	browser = build_browser_provider()
+	with_browser = browser is not None
 
 	try:
 		resultado = _procesar_cliente_pipeline(
@@ -355,21 +346,30 @@ def _run_browser_tool(
 	echo_func: Optional[Callable[[str], None]] = None,
 	on_live_url: Optional[Callable[[str], None]] = None,
 	on_step: Optional[Callable[[int, str, str, str], None]] = None,
+	*,
+	session_store: object | None = None,
+	binding: object | None = None,
+	on_task_metrics: Optional[Callable[[dict], None]] = None,
 ) -> dict[str, Any] | None:
-	"""Ejecuta una tool de browser (Phase-1) vía ComposioBrowser.
+	"""Ejecuta una tool de browser (Phase-1) vía el provider configurado.
 
 	Generalización de ``_handle_sistemaregistral``: para cualquier ToolSpec con
 	``needs_browser=True`` corre ``build_browser_tasks(**spec.task_flags)`` →
-	``ComposioBrowser.run_single`` → devuelve el dict de salida para el
+	``BrowserPort.run_single`` → devuelve el dict de salida para el
 	formatter. Mantiene los guards existentes (COMPOSIO_KEY_MISSING /
 	INTEGRATION_DISABLED / BROWSER_ERROR).
 
-	``on_live_url`` se invoca en cuanto Composio provisiona la sesión de browser
+	``on_live_url`` se invoca en cuanto el provider provisiona la sesión de browser
 	(viva), para que el frontend pueda embeberla mientras la automatización corre.
+
+	``session_store``/``binding``/``on_task_metrics`` habilitan el reuso de
+	sesión persistida de Browserbase: el provider recibe el binding (context
+	ya logueado) y devuelve las métricas reales del run vía el callback síncrono
+	(el wiring async las persiste con await).
 	"""
 	from agente_fiscal.api.deps import REPRESENTANTE_CUIT, get_ta
-	from agente_fiscal.adapters.browser import ComposioBrowser
 	from agente_fiscal.adapters.browser.factory import build_browser_tasks
+	from agente_fiscal.adapters.browser.provider import build_browser_provider
 	from agente_fiscal.config import get_settings
 	from agente_fiscal.domain.models import ClientConfig
 	from agente_fiscal.features import integration_enabled
@@ -379,22 +379,21 @@ def _run_browser_tool(
 		return None
 
 	creds = get_settings().credentials
-	if not creds.composio_api_key or not creds.clave_fiscal:
-		return {
-			'error': 'COMPOSIO_KEY_MISSING',
-			'detail': f'Falta COMPOSIO_API_KEY o ESTUDIO_CLAVE_FISCAL en .env para usar {spec.tool_name}.',
-		}
 	if not integration_enabled('browser'):
 		return {
 			'error': 'INTEGRATION_DISABLED',
 			'detail': 'La integración de browser (Composio) está deshabilitada (BROWSER_ENABLED=false).',
 		}
 
-	browser = ComposioBrowser(
-		composio_api_key=creds.composio_api_key,
-		estudio_cuit=REPRESENTANTE_CUIT,
-		estudio_clave=creds.clave_fiscal,
+	browser = build_browser_provider(
+		session_store=session_store,
+		binding=binding,
 	)
+	if browser is None:
+		return {
+			'error': 'COMPOSIO_KEY_MISSING',
+			'detail': f'Falta COMPOSIO_API_KEY o ESTUDIO_CLAVE_FISCAL en .env para usar {spec.tool_name}.',
+		}
 	try:
 		tasks = build_browser_tasks(
 			cuit=REPRESENTANTE_CUIT,
@@ -408,6 +407,7 @@ def _run_browser_tool(
 			echo_func=echo_func,
 			on_live_url=on_live_url,
 			on_step=on_step,
+			on_task_metrics=on_task_metrics,
 		)
 	except Exception as exc:
 		return {'error': 'BROWSER_ERROR', 'detail': str(exc)}
@@ -429,21 +429,29 @@ def _run_engine_tool(
 	``calendariovencimientosarca`` → ``RulesEngine.calcular``. Reusa los códigos
 	de error de ``routes/calendar.py`` (TA_UNAVAILABLE | TAXPAYER_QUERY_FAILED |
 	TAXPAYER_NOT_FOUND | CALENDAR_FAILED) y emite un ``progress`` por etapa.
+
+	``PadronNotFoundError`` (SOAP Fault ``No existe persona con ese Id``) se
+	mapea a ``TAXPAYER_NOT_FOUND``; el resto de fallos del padrón a
+	``TAXPAYER_QUERY_FAILED``. Para ``TA_UNAVAILABLE`` se incluye la causa real
+	de ``get_ta_error()`` (certificados ausentes, WSAA caído, timeout, etc.).
 	"""
 	from datetime import datetime
 
+	from agente_fiscal.adapters.arca_ws import PadronNotFoundError, consultar_cuit, get_ta_error
 	from agente_fiscal.api.deps import REPRESENTANTE_CUIT, get_engine, get_ta
-	from agente_fiscal.adapters.arca_ws import consultar_cuit
 
 	token, sign = get_ta()
 	if not token or not sign:
-		return {'error': 'TA_UNAVAILABLE', 'detail': 'No se pudo obtener Ticket de Acceso de ARCA'}
+		reason = get_ta_error() or 'No se pudo obtener el Ticket de Acceso de ARCA'
+		return {'error': 'TA_UNAVAILABLE', 'detail': reason}
 
 	if echo_func:
 		echo_func('  Consultando Padrón A5 ...')
 	try:
 		result = consultar_cuit(cuit, token, sign, REPRESENTANTE_CUIT)
 		output = result.to_output()
+	except PadronNotFoundError as exc:
+		return {'error': 'TAXPAYER_NOT_FOUND', 'detail': str(exc)}
 	except Exception as exc:
 		return {'error': 'TAXPAYER_QUERY_FAILED', 'detail': str(exc)}
 
@@ -583,7 +591,6 @@ def _handle_reporte_with_echo(
 
 	from agente_fiscal.api.deps import REPRESENTANTE_CUIT, get_engine, get_memory, get_pdf_gen, get_ta
 	from agente_fiscal.cli import _procesar_cliente_pipeline
-	from agente_fiscal.config import get_settings
 	from agente_fiscal.domain.models import ClientConfig
 	from agente_fiscal.pipeline.service import PipelineService, _completar_cliente_desde_padron
 
@@ -604,22 +611,14 @@ def _handle_reporte_with_echo(
 	pdf_gen = get_pdf_gen()
 	memory = get_memory()
 
-	creds = get_settings().credentials
-	browser = None
-	with_browser = bool(creds.composio_api_key and creds.clave_fiscal)
+	from agente_fiscal.adapters.browser.provider import build_browser_provider
+	from agente_fiscal.features import IntegrationDisabledError, integration_enabled
 
-	if with_browser:
-		from agente_fiscal.adapters.browser import ComposioBrowser
-		from agente_fiscal.features import IntegrationDisabledError, integration_enabled
+	if not integration_enabled('browser'):
+		raise IntegrationDisabledError('browser')
 
-		if not integration_enabled('browser'):
-			raise IntegrationDisabledError('browser')
-
-		browser = ComposioBrowser(
-			composio_api_key=creds.composio_api_key,
-			estudio_cuit=REPRESENTANTE_CUIT,
-			estudio_clave=creds.clave_fiscal,
-		)
+	browser = build_browser_provider()
+	with_browser = browser is not None
 
 	try:
 		resultado = _procesar_cliente_pipeline(
@@ -663,7 +662,6 @@ def _handle_wizard_pipeline(
 
 	from agente_fiscal.api.deps import REPRESENTANTE_CUIT, get_engine, get_memory, get_pdf_gen, get_ta
 	from agente_fiscal.cli import _procesar_cliente_pipeline
-	from agente_fiscal.config import get_settings
 	from agente_fiscal.domain.models import ClientConfig
 	from agente_fiscal.pipeline.service import _completar_cliente_desde_padron
 
@@ -684,25 +682,19 @@ def _handle_wizard_pipeline(
 	pdf_gen = get_pdf_gen()
 	memory = get_memory()
 
-	creds = get_settings().credentials
 	uses_browser = tasks.deuda or tasks.facilidades or tasks.registro or tasks.iibb
 	browser = None
 
 	if uses_browser:
-		if not (creds.composio_api_key and creds.clave_fiscal):
+		from agente_fiscal.adapters.browser.provider import build_browser_provider
+		from agente_fiscal.features import IntegrationDisabledError, integration_enabled
+
+		if not integration_enabled('browser'):
+			raise IntegrationDisabledError('browser')
+
+		browser = build_browser_provider()
+		if browser is None:
 			echo_func('  ⚠️  Credenciales de browser no configuradas — algunas tareas no estarán disponibles')
-		else:
-			from agente_fiscal.adapters.browser import ComposioBrowser
-			from agente_fiscal.features import IntegrationDisabledError, integration_enabled
-
-			if not integration_enabled('browser'):
-				raise IntegrationDisabledError('browser')
-
-			browser = ComposioBrowser(
-				composio_api_key=creds.composio_api_key,
-				estudio_cuit=REPRESENTANTE_CUIT,
-				estudio_clave=creds.clave_fiscal,
-			)
 
 	try:
 		resultado = _procesar_cliente_pipeline(
@@ -1035,13 +1027,41 @@ async def chat_message_stream(
 	if tool_key is not None:
 		# ── Streaming genérico de browser tools (ToolSpec dispatch) ──────
 		# Emite `conversation_start` → `progress*` → (`live_url` + `agent_step`
-		# solo con sesión Composio viva) → `complete`. Reusa el mismo framing
-		# SSE que REPORTE_COMPLETO; engines deterministas (consultaarca /
+		# solo con sesión Composio viva) → (`task_update` con métricas reales del
+		# run Browserbase) → `complete`. Reusa el mismo framing SSE que
+		# REPORTE_COMPLETO; engines deterministas (consultaarca /
 		# calendariovencimientosarca) no emiten live_url/agent_step.
 		spec = TOOL_SPECS[tool_key]
 		queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 		_loop = asyncio.get_running_loop()
 		_progress_messages: list[str] = []
+
+		# ── Reuso de sesión Browserbase: store + acquire ANTES de correr ──
+		# El store es opcional y NUNCA rompe la tool: si no hay factory, el
+		# acquire falla o el reuso está deshabilitado, se sigue como antes
+		# (run efímero sin contexto persistido).
+		session_store: object | None = None
+		binding: object | None = None
+		if spec.needs_browser:
+			from agente_fiscal.adapters.db_browser_sessions import PostgresBrowserSessionsRepository
+			from agente_fiscal.config import get_settings as _get_browser_settings
+
+			_browser_cfg = _get_browser_settings()
+			_factory = getattr(fastapi_request.app.state, 'session_factory', None)
+			if _factory is not None and tenant_id and getattr(_browser_cfg, 'browser_session_reuse', True):
+				try:
+					session_store = PostgresBrowserSessionsRepository(_factory)
+					_tenant_uuid = uuid.UUID(str(tenant_id))
+					_profile_uuid = request.profile_id
+					binding = await session_store.acquire(
+						_tenant_uuid,
+						_profile_uuid,
+						provider='browserbase',
+					)
+				except Exception as exc:
+					logger.warning('Reuso de sesión browser no disponible: %s', exc)
+					session_store = None
+					binding = None
 
 		def _progress(msg: str) -> None:
 			_progress_messages.append(msg)
@@ -1053,10 +1073,63 @@ async def chat_message_stream(
 		def _on_step(step, goal, url, status='running'):
 			_loop.call_soon_threadsafe(queue.put_nowait, ('agent_step', {'step': step, 'goal': goal, 'url': url, 'status': status}))
 
+		def _on_task_metrics(metrics: dict) -> None:
+			# Síncrono (corre en to_thread): solo encola; el persist async se
+			# hace en _generate_tool cuando drena el evento 'task_metrics'.
+			_loop.call_soon_threadsafe(queue.put_nowait, ('task_metrics', metrics))
+
+		async def _persist_task_metrics(metrics: dict) -> None:
+			"""Persiste la sesión real del run (create si fue efímera, release si
+			se reusó un binding) desde el loop async. Nunca rompe el stream."""
+			if session_store is None:
+				return
+			from agente_fiscal.config import get_settings as _get_browser_settings
+			from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+			_ttl = getattr(_get_browser_settings(), 'browser_session_ttl_seconds', 3600)
+			_now = _dt.now(_tz.utc)
+			_expires_at = _now + _td(seconds=_ttl) if _ttl else None
+			_context_id = (metrics.get('context_id') or '').strip() or None
+			_session_id = (metrics.get('session_id') or '').strip() or None
+			try:
+				if binding is not None:
+					await session_store.release(
+						id=uuid.UUID(str(binding.id)),
+						context_id=_context_id,
+						session_id=_session_id,
+						proxy_bytes=metrics.get('proxy_bytes'),
+						duration_ms=metrics.get('duration_ms'),
+						cost_cents=metrics.get('cost_cents') or 0,
+						started_at=_dt.fromisoformat(metrics['started_at']) if metrics.get('started_at') else _now,
+						ended_at=_dt.fromisoformat(metrics['ended_at']) if metrics.get('ended_at') else _now,
+						last_used_at=_now,
+						expires_at=_expires_at,
+					)
+				elif _context_id:
+					await session_store.create(
+						tenant_id=uuid.UUID(str(tenant_id)),
+						profile_id=request.profile_id,
+						provider='browserbase',
+						context_id=_context_id,
+						expires_at=_expires_at,
+					)
+			except Exception as exc:
+				logger.warning('No se pudo persistir la sesión de browser: %s', exc)
+
 		async def _run_tool():
 			try:
 				if spec.needs_browser:
-					data = await asyncio.to_thread(_run_browser_tool, spec, cuit, _progress, _on_live_url, _on_step)
+					data = await asyncio.to_thread(
+						_run_browser_tool,
+						spec,
+						cuit,
+						_progress,
+						_on_live_url,
+						_on_step,
+						session_store=session_store,
+						binding=binding,
+						on_task_metrics=_on_task_metrics,
+					)
 				else:
 					data = await asyncio.to_thread(_run_engine_tool, spec, cuit, _progress)
 				reply = _resolve_formatter(spec.formatter_name)(data, cuit)
@@ -1098,6 +1171,18 @@ async def chat_message_stream(
 					yield f'event: live_url\ndata: {json.dumps({"url": payload})}\n\n'
 				elif event_type == 'agent_step':
 					yield f'event: agent_step\ndata: {json.dumps(payload)}\n\n'
+				elif event_type == 'task_metrics':
+					# Metadatos del run terminado: persiste la sesión (async) y
+					# emite el evento task_update con las métricas REALES.
+					await _persist_task_metrics(payload)
+					yield f'event: task_update\ndata: {json.dumps({
+						'status': 'finished',
+						'durationMs': payload.get('duration_ms') or 0,
+						'costCents': payload.get('cost_cents') or 0,
+						'proxyBytes': payload.get('proxy_bytes') or 0,
+						'sessionId': payload.get('session_id') or '',
+						'contextId': payload.get('context_id') or '',
+					})}\n\n'
 				elif event_type == 'complete':
 					yield f'event: complete\ndata: {json.dumps(payload)}\n\n'
 					break

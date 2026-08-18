@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -155,6 +156,58 @@ class Profile(UuidPkMixin, TimestampMixin, Base):
         Index('ix_profiles_tenant_id', 'tenant_id'),
         Index('ix_profiles_tenant_status', 'tenant_id', 'status'),
         Index('ix_profiles_created_by', 'created_by'),
+    )
+
+
+class BrowserSession(UuidPkMixin, TimestampMixin, Base):
+    """Persisted Browserbase context per (tenant, profile, provider).
+
+    Mapea en NUESTRA base el contexto persistido del provider (Browserbase):
+    las cookies del login ARCA sobreviven entre runs reuseando
+    ``browser_settings.context`` → la siguiente tool arranca ya logueada. La
+    fila única activa cicla ``active ↔ in_use``: ``acquire`` la marca in_use de
+    forma atómica (FOR UPDATE SKIP LOCKED) y ``release`` la vuelve a active con
+    las métricas reales del último run (proxy bytes, duración, costo).
+    ``expires_at`` es el TTL del contexto: vencido ya no se reusa.
+    """
+
+    __tablename__ = 'browser_sessions'
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey('tenants.id', ondelete='CASCADE'), nullable=False
+    )
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey('profiles.id', ondelete='SET NULL'), nullable=True
+    )
+    provider: Mapped[str] = mapped_column(
+        String(32), nullable=False, default='browserbase', server_default='browserbase'
+    )
+    context_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default='active', server_default='active'
+    )
+    session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    proxy_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    tenant: Mapped[Tenant] = relationship()
+    profile: Mapped[Profile | None] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'in_use')",
+            name='browser_sessions_status_check',
+        ),
+        UniqueConstraint(
+            'tenant_id', 'profile_id', 'provider',
+            name='uq_browser_sessions_tenant_profile_provider',
+        ),
+        Index('ix_browser_sessions_tenant_profile_id', 'tenant_id', 'profile_id'),
     )
 
 

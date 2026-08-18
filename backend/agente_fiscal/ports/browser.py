@@ -1,8 +1,12 @@
-"""Browser ports — abstraction over the Composio browser extraction runner."""
+"""Browser ports — the interface consumed by the extraction layer.
+
+The pipeline/API/CLI/MCP depend on ``BrowserPort``, never on a concrete
+provider. Concrete providers (ComposioBrowser, MockBrowser, future ones)
+are resolved by name through ``adapters.browser.provider.build_browser_provider``.
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Callable, Optional, Protocol, runtime_checkable
 
 from agente_fiscal.domain.models import ClientConfig, DeudaOutput
@@ -14,17 +18,26 @@ class BrowserRunnerPort(Protocol):
 
 	def run_single(
 		self,
-		cliente: ClientConfig,
+		cliente: Optional[ClientConfig],
 		tasks: Optional[list[object]] = None,
 		echo_func: Optional[Callable[[str], None]] = None,
+		on_live_url: Optional[Callable[[str], None]] = None,
+		on_step: Optional[Callable[[int, str, str, str], None]] = None,
 	) -> DeudaOutput:
-		"""Run the given browser tasks. Returns a DeudaOutput, never raises."""
+		"""Run the given browser tasks for one client. Returns a DeudaOutput, never raises.
+
+		``cliente`` may be ``None`` (the MCP tool passes only ``tasks``).
+		"""
 		...
 
 
 @runtime_checkable
 class BrowserPort(BrowserRunnerPort, Protocol):
-	"""Full browser automation contract (runner + lifecycle)."""
+	"""Full browser automation contract (runner + batch + lifecycle)."""
+
+	async def run_all(self, clientes: list[ClientConfig]) -> list[DeudaOutput]:
+		"""Process every client (typically in parallel), 1:1 with the input."""
+		...
 
 	async def close(self) -> None:
 		"""Release browser resources."""

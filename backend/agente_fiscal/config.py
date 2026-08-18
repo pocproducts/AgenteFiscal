@@ -51,6 +51,8 @@ class Credentials(BaseSettings):
 	  - ``ESTUDIO_CUIT`` — CUIT del estudio (representante legal)
 	  - ``ESTUDIO_CLAVE_FISCAL`` — clave fiscal del estudio
 	  - ``COMPOSIO_API_KEY`` — API key de Composio (browser automation)
+	  - ``BROWSERBASE_API_KEY`` — API key de Browserbase (browser automation)
+	  - ``BROWSERBASE_PROJECT_ID`` — project id opcional de Browserbase
 	"""
 
 	model_config = SettingsConfigDict(extra='ignore')
@@ -58,6 +60,8 @@ class Credentials(BaseSettings):
 	cuit: str = Field(default='20324837796', alias='ESTUDIO_CUIT')
 	clave_fiscal: str = Field(default='', alias='ESTUDIO_CLAVE_FISCAL')
 	composio_api_key: str = Field(default='', alias='COMPOSIO_API_KEY')
+	browserbase_api_key: str = Field(default='', alias='BROWSERBASE_API_KEY')
+	browserbase_project_id: str = Field(default='', alias='BROWSERBASE_PROJECT_ID')
 
 
 class AppSettings(BaseSettings):
@@ -109,6 +113,8 @@ class AppSettings(BaseSettings):
 	cuit: str = Field(default='20324837796', alias='ESTUDIO_CUIT')
 	clave_fiscal: str = Field(default='', alias='ESTUDIO_CLAVE_FISCAL')
 	composio_api_key: str = Field(default='', alias='COMPOSIO_API_KEY')
+	browserbase_api_key: str = Field(default='', alias='BROWSERBASE_API_KEY')
+	browserbase_project_id: str = Field(default='', alias='BROWSERBASE_PROJECT_ID')
 
 	# ── Clerk (JWT auth) ────────────────────────────────────────────────
 	clerk_secret_key: str = Field(default='', alias='CLERK_SECRET_KEY')
@@ -146,7 +152,23 @@ class AppSettings(BaseSettings):
 	browser_enabled: bool = Field(
 		default=False,
 		alias='BROWSER_ENABLED',
-		description='If False, Composio browser is disabled — no Composio cloud calls',
+		description='If False, browser provider is disabled — no browser cloud calls',
+	)
+	browser_provider: str = Field(
+		default='browserbase',
+		alias='BROWSER_PROVIDER',
+		description='Browser backend plug-in: "browserbase" (Agents API), "composio" (cloud REST) o "mock" (deterministic local, sin cloud)',
+	)
+	# ── Reuso de sesión de browser (Browserbase context persistence) ─────
+	browser_session_ttl_seconds: int = Field(
+		default=3600,
+		alias='BROWSER_SESSION_TTL_SECONDS',
+		description='TTL en segundos del contexto persistido de Browserbase (vencido ya no se reusa)',
+	)
+	browser_session_reuse: bool = Field(
+		default=True,
+		alias='BROWSER_SESSION_REUSE',
+		description='If False, cada tool arranca un run efímero sin reusar el contexto persistido',
 	)
 	pdf_enabled: bool = Field(
 		default=True,
@@ -166,6 +188,8 @@ class AppSettings(BaseSettings):
 			cuit=self.cuit,
 			clave_fiscal=self.clave_fiscal,
 			composio_api_key=self.composio_api_key,
+			browserbase_api_key=self.browserbase_api_key,
+			browserbase_project_id=self.browserbase_project_id,
 		)
 
 

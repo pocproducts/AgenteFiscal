@@ -79,6 +79,12 @@ export function AgentComposer() {
       return;
     }
     setActiveProfileId(value);
+    // Selecting a profile with a stored CUIT completes the CUIT field, so the
+    // user never has to retype it.
+    const profile = profiles.find((p) => p.id === value);
+    if (profile?.cuit) {
+      setCuit(profile.cuit);
+    }
   };
 
   const launch = (action: string) => {

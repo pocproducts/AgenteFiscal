@@ -15,7 +15,6 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 from agente_fiscal.api.deps import get_ta
-from agente_fiscal.config import get_settings
 from agente_fiscal.adapters.memory import FiscalMemoryClient
 from agente_fiscal.adapters.pdf_generator import PdfGenerator
 from agente_fiscal.domain.rules_engine import RulesEngine
@@ -34,7 +33,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
 	  - engine:      RulesEngine instance
 	  - pdf_gen:     PdfGenerator instance
 	  - ta_cache:    (token, sign) tuple from get_ta()
-	  - browser:     ComposioBrowser or None (if COMPOSIO_API_KEY not set)
+	  - browser:     browser provider (BrowserPort) or None (si la integración
+	    está deshabilitada o faltan credenciales)
 	  - memory:      FiscalMemoryClient instance (best-effort, never raises)
 	"""
 	logger.info('[mcp] Initializing services ...')
@@ -43,25 +43,16 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
 	ta_cache = get_ta()
 	memory = FiscalMemoryClient()
 
-	# Browser: lazy init, only if the integration is enabled AND env is set
+	# Browser: lazy init, only if the integration is enabled
 	browser = None
-	creds = get_settings().credentials
-	composio_key = creds.composio_api_key
-	if composio_key and integration_enabled('browser'):
+	if integration_enabled('browser'):
 		try:
-			from agente_fiscal.adapters.browser import ComposioBrowser
+			from agente_fiscal.adapters.browser.provider import build_browser_provider
 
-			estudio_cuit = creds.cuit
-			estudio_clave = creds.clave_fiscal
-			browser = ComposioBrowser(
-				composio_api_key=composio_key,
-				estudio_cuit=estudio_cuit,
-				estudio_clave=estudio_clave,
-				headed=False,
-			)
-			logger.info('[mcp] ComposioBrowser initialized')
+			browser = build_browser_provider()
+			logger.info('[mcp] Browser provider initialized: %s', type(browser).__name__ if browser else 'None')
 		except Exception as exc:
-			logger.warning('[mcp] Failed to init ComposioBrowser: %s', exc)
+			logger.warning('[mcp] Failed to init browser provider: %s', exc)
 
 	ctx = {
 		'engine': engine,

@@ -77,6 +77,8 @@ class _FakeSettings:
 		clave_fiscal = 'test-clave'
 
 	credentials = _Credentials()
+	browser_enabled = True
+	browser_provider = 'composio'
 
 
 class FakeBrowser:
@@ -96,6 +98,7 @@ class FakeBrowser:
 		echo_func=None,
 		on_live_url=None,
 		on_step=None,
+		on_task_metrics=None,
 	) -> DeudaOutput:
 		if self.failure is not None:
 			raise self.failure
@@ -106,6 +109,8 @@ class FakeBrowser:
 		if on_step:
 			on_step(1, 'Primer paso', 'https://padron.example', 'running')
 			on_step(1, '', '', 'finished')
+		if on_task_metrics:
+			on_task_metrics({'duration_ms': 100, 'cost_cents': 2, 'proxy_bytes': 1024, 'session_id': 's1', 'context_id': 'c1', 'started_at': '2026-08-17T00:00:00+00:00', 'ended_at': '2026-08-17T00:01:00+00:00'})
 		return self.output
 
 
@@ -219,7 +224,13 @@ def engine_env(monkeypatch):
 async def test_browser_tool_streams_five_events(browser_env, monkeypatch, tool_key, message):
 	"""5-event contract por tool Phase-1: conversation_start → progress →
 	live_url → agent_step → complete, con data por tool (SSRR parity incluida)."""
-	monkeypatch.setattr(browser_env, 'ComposioBrowser', FakeBrowser(output=_output_for(tool_key)))
+	from agente_fiscal.adapters.browser.provider import PROVIDERS
+
+	monkeypatch.setitem(
+		PROVIDERS,
+		'composio',
+		lambda settings=None, headed=False: FakeBrowser(output=_output_for(tool_key)),
+	)
 
 	transport = httpx.ASGITransport(app=_build_app())
 	async with httpx.AsyncClient(transport=transport, base_url='http://test') as client:
@@ -329,9 +340,15 @@ async def test_calendario_streams_engine_output_without_browser(engine_env, monk
 # ── Failure: complete.data.error + reply corto ─────────────────────────────
 
 
-async def test_browser_failure_emits_error_complete(browser_env):
+async def test_browser_failure_emits_error_complete(browser_env, monkeypatch):
 	"""Failure del browser → complete.data.error='BROWSER_ERROR' y reply corto."""
-	browser_env.ComposioBrowser = FakeBrowser(output=None, failure=RuntimeError('Composio 403'))
+	from agente_fiscal.adapters.browser.provider import PROVIDERS
+
+	monkeypatch.setitem(
+		PROVIDERS,
+		'composio',
+		lambda settings=None, headed=False: FakeBrowser(output=None, failure=RuntimeError('Composio 403')),
+	)
 
 	transport = httpx.ASGITransport(app=_build_app())
 	async with httpx.AsyncClient(transport=transport, base_url='http://test') as client:
@@ -367,6 +384,32 @@ async def test_engine_failure_emits_engine_error(engine_env, monkeypatch):
 	complete = frames[-1][1]
 	assert complete['data']['error'] == 'TAXPAYER_QUERY_FAILED'
 	assert 'WS caído' in complete['data']['detail']
+
+
+async def test_arca_missing_persona_fault_maps_to_not_found(engine_env, monkeypatch):
+	"""SOAP Fault 'No existe persona con ese Id' → TAXPAYER_NOT_FOUND con reply
+	amigable (sin filtrar el 500 crudo)."""
+	from agente_fiscal.adapters.arca_ws import PadronNotFoundError
+
+	def _padron_missing(*_a, **_k):
+		raise PadronNotFoundError('No existe persona con ese Id')
+
+	monkeypatch.setattr(
+		'agente_fiscal.adapters.arca_ws.consultar_cuit',
+		_padron_missing,
+	)
+
+	transport = httpx.ASGITransport(app=_build_app())
+	async with httpx.AsyncClient(transport=transport, base_url='http://test') as client:
+		res = await client.post('/v1/chat/message/stream', json={'message': f'consultaarca CUIT {CUIT_HYPHEN}'})
+
+	assert res.status_code == 200
+	frames = _parse_sse(res.text)
+	complete = frames[-1][1]
+	assert complete['data']['error'] == 'TAXPAYER_NOT_FOUND'
+	assert 'no figura en el padrón' in complete['reply']
+	assert '500 Server Error' not in complete['reply']
+	assert 'TAXPAYER_NOT_FOUND' not in complete['reply']
 
 
 # ── Resolubilidad de formatters desde el dispatch ──────────────────────────

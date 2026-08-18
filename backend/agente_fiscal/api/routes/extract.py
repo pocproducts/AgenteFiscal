@@ -63,11 +63,15 @@ async def extract(
 
 	cuit = request.cuit
 	creds = get_settings().credentials
-	composio_key = creds.composio_api_key
 	estudio_clave = creds.clave_fiscal
 	memory = get_memory()
 
-	if not composio_key:
+	from agente_fiscal.adapters.browser.provider import build_browser_provider
+	from agente_fiscal.adapters.browser import FacilidadesTask, RegistroTask, VencimientosDeudasTask
+	from agente_fiscal.domain.models import ClientConfig
+
+	browser = build_browser_provider()
+	if browser is None:
 		return UnifiedResponse(
 			status='error',
 			error=ApiError(
@@ -75,24 +79,6 @@ async def extract(
 				cause='COMPOSIO_API_KEY no configurada en .env',
 			),
 		)
-	if not estudio_clave:
-		return UnifiedResponse(
-			status='error',
-			error=ApiError(
-				code='ESTUDIO_CLAVE_MISSING',
-				cause='ESTUDIO_CLAVE_FISCAL no configurada en .env',
-			),
-		)
-
-	from agente_fiscal.adapters.browser import ComposioBrowser
-	from agente_fiscal.adapters.browser import FacilidadesTask, RegistroTask, VencimientosDeudasTask
-	from agente_fiscal.domain.models import ClientConfig
-
-	browser = ComposioBrowser(
-		composio_api_key=composio_key,
-		estudio_cuit=REPRESENTANTE_CUIT,
-		estudio_clave=estudio_clave,
-	)
 
 	# Build task list from request
 	available_tasks = {

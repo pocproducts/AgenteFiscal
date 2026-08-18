@@ -6,6 +6,7 @@ import {
 } from "ai";
 import {
   AGENT_SESSION_WINDOW_MS,
+  NO_MONITOR_TOOLS,
   TOOL_KEY_RE,
   TOOL_NAMES,
   TOOL_WINDOW_OVERRIDES,
@@ -297,22 +298,27 @@ export async function POST(request: Request) {
         let assistantText = "";
         try {
           // Browser tools: resolve toolKey/toolName/windowMs from the matcher
-          // (single source: lib/agent-window.ts). Non-tool messages go through
-          // the generic backend chat path below.
+          // (single source: lib/agent-window.ts). Non-tool messages AND
+          // deterministic engines (consultaarca / calendariovencimientosarca)
+          // go through the generic backend chat path below — they must NOT
+          // open the agent monitor.
           const toolMatch = userText.match(TOOL_KEY_RE);
           const toolKey = toolMatch ? toolMatch[0].toLowerCase() : null;
           const isToolCommand = Boolean(toolKey && TOOL_NAMES[toolKey]);
+          const isNoMonitorTool = Boolean(
+            toolKey &&
+              (NO_MONITOR_TOOLS as readonly string[]).includes(toolKey)
+          );
 
-          // Tool window (used in session-start AND the remaining-window wait).
-          const windowMs =
-            TOOL_WINDOW_OVERRIDES[toolKey ?? ""] ?? AGENT_SESSION_WINDOW_MS;
-
-          if (isToolCommand && toolKey) {
+          if (isToolCommand && toolKey && !isNoMonitorTool) {
             // ── Browser tool: real backend wiring (Route BFF → /v1/chat/message/stream) ──
             // The backend runs the real automation (ComposioBrowser o motor
             // determinista según ToolSpec) and returns the tool data (incl.
             // live_url) + a formatted markdown reply. We map that into the
             // agent-sidebar SSE events the UI already consumes.
+            // Tool window (used in session-start AND the remaining-window wait).
+            const windowMs =
+              TOOL_WINDOW_OVERRIDES[toolKey] ?? AGENT_SESSION_WINDOW_MS;
             const agentId = generateId();
             const toolName = TOOL_NAMES[toolKey];
 
@@ -421,6 +427,35 @@ export async function POST(request: Request) {
                     } catch {
                       // Ignore malformed agent_step frame.
                     }
+                  } else if (event === "task_update") {
+                    // Real browser metrics (Browserbase run finished): surface the
+                    // actual duration/cost/bandwidth on the current agent step
+                    // (data-stream-handler.tsx matches the same `sr-step-N` id the
+                    // last data-agent-browser-step emitted — step=1 for a tool).
+                    try {
+                      const parsed = JSON.parse(data) as {
+                        status?: string;
+                        durationMs?: number;
+                        costCents?: number;
+                        proxyBytes?: number;
+                        sessionId?: string;
+                        contextId?: string;
+                      };
+                      if (parsed) {
+                        dataStream.write({
+                          type: "data-agent-task-update",
+                          data: {
+                            agentId,
+                            taskId: "sr-step-1",
+                            status: "completed",
+                            durationMs: parsed.durationMs ?? 0,
+                            costCents: parsed.costCents ?? 0,
+                          },
+                        });
+                      }
+                    } catch {
+                      // Ignore malformed task_update frame.
+                    }
                   } else if (event === "complete") {
                     try {
                       const parsed = JSON.parse(data) as {
@@ -510,7 +545,11 @@ export async function POST(request: Request) {
             }
           } else {
             // The backend is the sole intent router: forward every message,
-            // even ones without a CUIT — it answers with its help/UNKNOWN reply.
+            // even ones without a CUIT — it answers with its help/UNKNOWN
+            // reply. Deterministic engine tools (consultaarca /
+            // calendariovencimientosarca) land here too: no agent monitor,
+            // and their formatted reply already shows everything, so we skip
+            // the raw JSON dump for them.
             const history = buildHistory(uiMessages as ClientUIMessage[]);
             const res = await callBackend<ChatResponse>("/v1/chat/message", {
               method: "POST",
@@ -527,7 +566,11 @@ export async function POST(request: Request) {
             });
 
             assistantText = res.reply;
-            if (res.data && typeof res.data === "object") {
+            if (
+              res.data &&
+              typeof res.data === "object" &&
+              !isNoMonitorTool
+            ) {
               // Keep raw structured results visible for debugging.
               assistantText += `\n\n<details><summary>Datos</summary>\n\n\`\`\`json\n${JSON.stringify(res.data, null, 2)}\n\`\`\`\n\n</details>`;
             }

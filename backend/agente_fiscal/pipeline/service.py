@@ -18,6 +18,7 @@ from agente_fiscal.domain.approvals import validate_actions
 from agente_fiscal.domain.models import AppConfig, ClientConfig, TipoContribuyente, TipoPersona
 from agente_fiscal.domain.rules_engine import RulesEngine
 from agente_fiscal.pipeline.models import PipelineResult, ProposalOutcome
+from agente_fiscal.ports.browser import BrowserPort
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +194,7 @@ class PipelineService:
 		sign: str,
 		mes: int,
 		anio: int,
-		browser: Optional[object] = None,
+		browser: Optional[BrowserPort] = None,
 		*,
 		with_deuda: bool = False,
 		with_facilidades: bool = False,
@@ -549,7 +550,7 @@ class PipelineService:
 		sign: str,
 		mes: int,
 		anio: int,
-		browser: Optional[object] = None,
+		browser: Optional[BrowserPort] = None,
 		*,
 		with_deuda: bool = False,
 		with_facilidades: bool = False,

@@ -1,8 +1,9 @@
 """Tests unitarios de los formatters por tool (domain/response_builder.py).
 
-Cubre: rama error-first (BROWSER_ERROR → motivo corto; códigos de motor →
-`{code}` — detail) y el render de secciones por tool sobre dicts planos
-(la misma forma que reciben los handlers en runtime).
+Cubre: rama error-first (BROWSER_ERROR → motivo corto; códigos de motor
+conocidos → motivo amigable sin códigos internos ni 500 crudo) y el render
+de secciones por tool sobre dicts planos (la misma forma que reciben los
+handlers en runtime).
 """
 
 from __future__ import annotations
@@ -36,9 +37,19 @@ def test_error_browser_error_short_reason(formatter, tool):
 	assert 'traceback' not in reply  # nunca filtra el traceback crudo
 
 
-def test_error_engine_code_shows_detail():
-	reply = format_consultaarca_response({'error': 'TAXPAYER_QUERY_FAILED', 'detail': 'WS caído'}, CUIT)
-	assert '`TAXPAYER_QUERY_FAILED`' in reply and 'WS caído' in reply
+def test_error_engine_code_friendly_reason():
+	"""Códigos de motor conocidos → motivo amigable sin códigos internos ni 500 crudo."""
+	reply = format_consultaarca_response({'error': 'TAXPAYER_QUERY_FAILED', 'detail': '500 Server Error ...'}, CUIT)
+	assert 'No pude consultar' in reply and CUIT in reply
+	assert 'ARCA no respondió la consulta al padrón' in reply
+	assert 'TAXPAYER_QUERY_FAILED' not in reply
+	assert '500 Server Error' not in reply
+
+
+def test_error_not_found_friendly_reason():
+	reply = format_consultaarca_response({'error': 'TAXPAYER_NOT_FOUND', 'detail': 'No existe persona con ese Id'}, CUIT)
+	assert 'no figura en el padrón de ARCA' in reply
+	assert 'TAXPAYER_NOT_FOUND' not in reply
 
 
 def test_error_none_data_short_reply():
@@ -136,7 +147,7 @@ def test_consultaarca_padron_shape():
 		'impuestos_rg': [{'idImpuesto': '030', 'descripcionImpuesto': 'IVA', 'estadoImpuesto': 'Activo'}],
 	}
 	reply = format_consultaarca_response(data, CUIT)
-	assert 'ACME SA' in reply and 'responsable_inscripto' in reply and 'ACTIVO' in reply
+	assert 'ACME SA' in reply and 'Responsable Inscripto' in reply and 'ACTIVO' in reply
 	assert 'Av. Siempre Viva 742' in reply
 	assert '**Obligaciones:**' in reply and 'IVA' in reply
 

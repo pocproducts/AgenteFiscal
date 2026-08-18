@@ -5,6 +5,7 @@ Required by Alembic autogenerate (``target_metadata`` must see all models).
 
 from agente_fiscal.db.models.business import (
     BillingEvent,
+    BrowserSession,
     Client,
     Conversation,
     GeneratedPdf,
@@ -32,6 +33,7 @@ __all__ = [
     'ApiKey',
     'App',
     'BillingEvent',
+    'BrowserSession',
     'Client',
     'Conversation',
     'GeneratedPdf',

@@ -32,6 +32,16 @@ export const AGENT_SESSION_WINDOW_MS = 10 * 60_000;
 export const TOOL_KEY_RE =
   /\b(?:deudavencimientos|misfacilidades|rentascordoba|sistemaregistral|consultaarca|calendariovencimientosarca)\b/i;
 
+/**
+ * Deterministic engine tools: padrón A5 / rules engine, NO live browser
+ * session. The BFF routes them through the plain backend chat path, so they
+ * never open the agent monitor sidebar (no `data-agent-session-start`).
+ */
+export const NO_MONITOR_TOOLS = [
+  "consultaarca",
+  "calendariovencimientosarca",
+] as const;
+
 /** PascalCase display name per tool key (`data-agent-session-start.toolName`). */
 export const TOOL_NAMES: Record<string, string> = {
   sistemaregistral: "SistemaRegistral",

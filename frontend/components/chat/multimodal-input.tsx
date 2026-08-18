@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useProfiles } from "@/hooks/use-profiles";
+import { applyProfileCuitToInput } from "@/lib/cuit";
 import { useLanguage } from "@/lib/i18n";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -97,6 +98,17 @@ function PureMultimodalInput({
   );
 
   const { profiles, activeProfileId, setActiveProfileId } = useProfiles();
+
+  // Selecting a profile completes the CUIT part of the input with the profile's
+  // CUIT (when it has one), so the user never has to retype it (e.g. selecting
+  // "Gruppo Muratore" fills "30716395541 /…").
+  const handleProfileChange = (value: string) => {
+    setActiveProfileId(value);
+    const profile = profiles.find((p) => p.id === value);
+    if (profile?.cuit) {
+      setInput((prev) => applyProfileCuitToInput(prev ?? "", profile.cuit));
+    }
+  };
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -447,7 +459,7 @@ function PureMultimodalInput({
           {t.panel.chat.profile.label}
         </span>
         {profiles.length > 0 ? (
-          <Select onValueChange={setActiveProfileId} value={activeProfileId}>
+          <Select onValueChange={handleProfileChange} value={activeProfileId}>
             <SelectTrigger className="h-7 border-none bg-transparent px-2 text-xs text-muted-foreground hover:text-foreground shadow-none focus:ring-0 gap-1 rounded-lg">
               <SelectValue
                 placeholder={t.panel.chat.profile.selectPlaceholder}

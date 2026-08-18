@@ -30,12 +30,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agente_fiscal.adapters.arca_ws import get_ta
-from agente_fiscal.adapters.browser import ComposioBrowser
-from agente_fiscal.config import REPRESENTANTE_CUIT, get_settings
+from agente_fiscal.adapters.browser.provider import build_browser_provider
+from agente_fiscal.config import get_settings
 from agente_fiscal.db.models import Client, ReportRun
 from agente_fiscal.domain.models import ClientConfig
 from agente_fiscal.features import IntegrationDisabledError, integration_enabled
 from agente_fiscal.pipeline.service import PipelineService
+from agente_fiscal.ports.browser import BrowserPort
 from agente_fiscal.telemetry import init_telemetry
 
 logger = logging.getLogger(__name__)
@@ -235,26 +236,22 @@ class ReportRunner:
 			return ClientConfig(cuit=run.cuit)
 		return ClientConfig(cuit=run.cuit, nombre=client_row.name, email=client_row.email or '')
 
-	def _build_browser(self, needed: bool) -> Optional[ComposioBrowser]:
-		"""Lazily build the Composio browser only when a flag requires it.
+	def _build_browser(self, needed: bool) -> Optional[BrowserPort]:
+		"""Lazily build the env-selected browser provider only when a flag requires it.
 
 		Raises ``IntegrationDisabledError`` before any Composio cloud call when
-		the browser integration is disabled (``BROWSER_ENABLED=false``).
+		the browser integration is disabled (``BROWSER_ENABLED=false``), and
+		``RuntimeError`` when the composio credentials are missing (provider
+		unresolvable).
 		"""
 		if not needed:
 			return None
 		if not integration_enabled('browser', get_settings()):
 			raise IntegrationDisabledError('browser')
-		creds = get_settings().credentials
-		composio_key = creds.composio_api_key
-		estudio_clave = creds.clave_fiscal
-		if not composio_key or not estudio_clave:
+		provider = build_browser_provider(get_settings())
+		if provider is None:
 			raise RuntimeError('Missing COMPOSIO_API_KEY or ESTUDIO_CLAVE_FISCAL in .env')
-		return ComposioBrowser(
-			composio_api_key=composio_key,
-			estudio_cuit=REPRESENTANTE_CUIT,
-			estudio_clave=estudio_clave,
-		)
+		return provider
 
 	async def _fetch_next_queued(self) -> Optional[UUID]:
 		"""Return the id of the oldest ``queued`` run, or ``None``.
