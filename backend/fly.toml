@@ -8,7 +8,7 @@
 # permite escalar a 2+ máquinas sin doble ejecución.
 
 app = "agente-fiscal-backend"
-primary_region = "eze"
+primary_region = "gru"
 
 [deploy]
   # Corre Alembic en una MV temporal antes de liberar el release.

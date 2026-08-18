@@ -418,11 +418,11 @@ Levanta el mismo stack que Fly (Redis + backend + frontend) en contenedores, reu
 - **Overrides:** `REDIS_URL`/`MEMORY_REDIS_CACHE_URL` apuntan a `redis` (red de compose), `API_BASE_URL=http://backend:8000` para el BFF y `CORS_ORIGINS=http://localhost:3000`.
 - **Puertos ocupados:** si el stack de `dev.sh` sigue arriba, `compose.sh up` lo avisa — detenelo con `./dev.sh down`.
 
-**A Fly:** son los MISMOS Dockerfiles y `fly.toml`. El backend corre Alembic como `release_command`; los secrets se pasan con `fly secrets set ...` (ver `backend/.env.example`) y los `NEXT_PUBLIC_*` como build args en el deploy:
+**A Fly:** son los MISMOS Dockerfiles. Configs: `backend/fly.toml` (deployable desde `backend/`) y `fly.frontend.toml` (en la RAÍZ — Fly resuelve el dockerfile relativo al directorio del config, y el build del frontend requiere contexto raíz del monorepo). El backend corre Alembic como `release_command`; los secrets se pasan con `fly secrets set ...` (ver `backend/.env.example`; el script `./fly-deploy.sh` arma el comando desde los `.env` sin imprimir valores) y los `NEXT_PUBLIC_*` como build args en el deploy:
 
 ```bash
 cd backend && fly deploy                    # backend (secrets ya seteados en la app)
-fly deploy . --config frontend/fly.toml \
+fly deploy . --config fly.frontend.toml \
   --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxx \
   --build-arg NEXT_PUBLIC_SENTRY_DSN=...    # frontend, contexto desde la raíz
 ```
@@ -471,7 +471,7 @@ fly deploy . --config frontend/fly.toml \
 ## Despliegue
 
 - **Backend:** `backend/Dockerfile` (multi-stage, `uvicorn … --workers 2`). Local: lo levanta `./compose.sh up` (docker-compose) o `dev.sh`. En Fly corre con `release_command = alembic upgrade head`. El worker corre in-process, así que un solo contenedor ya ejecuta API + worker. El reclamo `FOR UPDATE SKIP LOCKED` permite escalar a 2+ workers sin doble ejecución.
-- **Frontend:** Fly (`frontend/Dockerfile` standalone + `frontend/fly.toml`, ver sección Docker) o Vercel (framework Next.js, ver `vercel.json`). Requiere `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` y `API_BASE_URL` apuntando al backend deployado.
+- **Frontend:** Fly (`frontend/Dockerfile` standalone + `fly.frontend.toml` en raíz, ver sección Docker) o Vercel (framework Next.js, ver `vercel.json`). Requiere `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` y `API_BASE_URL` apuntando al backend deployado.
 - **Postgres:** Neon (pooled `DATABASE_URL` + unpooled `DATABASE_URL_UNPOOLED` para Alembic). Async SQLAlchemy.
 - **Redis:** requerido para rate-limit/JWKS/cache. Opcional en el arranque (degrada), pero **necesario en prod** para el comportamiento correcto de auth/rate-limit.
 - **PDFs:** se guardan como `content_bytes` en Postgres (`generated_pdfs`). No se usa object storage externo hoy (aunque `@vercel/blob` existe en el frontend para artifacts de UI).
