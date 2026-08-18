@@ -3,39 +3,7 @@
 import { Menu, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { type Language, useLanguage } from "@/lib/i18n";
-
-function LanguageSwitcher({ className = "" }: { className?: string }) {
-  const { language, setLanguage } = useLanguage();
-
-  const options: { code: Language; label: string }[] = [
-    { code: "en", label: "EN" },
-    { code: "es", label: "ES" },
-  ];
-
-  return (
-    <fieldset
-      aria-label="Language selector"
-      className={`inline-flex items-center gap-0.5 rounded-full border border-foreground/15 p-0.5 ${className}`}
-    >
-      {options.map((option) => (
-        <button
-          aria-pressed={language === option.code}
-          className={`px-3 py-1 text-xs font-mono rounded-full transition-colors duration-300 ${
-            language === option.code
-              ? "bg-foreground text-background"
-              : "text-foreground/60 hover:text-foreground"
-          }`}
-          key={option.code}
-          onClick={() => setLanguage(option.code)}
-          type="button"
-        >
-          {option.label}
-        </button>
-      ))}
-    </fieldset>
-  );
-}
+import { useLanguage } from "@/lib/i18n";
 
 export function Navigation() {
   const { t } = useLanguage();
@@ -81,7 +49,7 @@ export function Navigation() {
               <span
                 className={`font-display tracking-tight transition-all duration-500 ${isScrolled ? "text-xl" : "text-2xl"}`}
               >
-                Optimus
+                Agente Fiscal
               </span>
               <span
                 className={`text-muted-foreground font-mono transition-all duration-500 ${isScrolled ? "text-[10px] mt-0.5" : "text-xs mt-1"}`}
@@ -89,9 +57,6 @@ export function Navigation() {
                 TM
               </span>
             </a>
-            <div className="hidden md:block">
-              <LanguageSwitcher />
-            </div>
           </div>
 
           {/* Desktop Navigation */}
@@ -182,7 +147,6 @@ export function Navigation() {
             }`}
             style={{ transitionDelay: isMobileMenuOpen ? "300ms" : "0ms" }}
           >
-            <LanguageSwitcher className="self-center" />
             <div className="flex gap-4">
               <Button
                 className="flex-1 rounded-full h-14 text-base"

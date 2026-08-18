@@ -27,64 +27,20 @@ export type LanguageProviderProps = {
   initialLocale?: Language;
 };
 
-export function LanguageProvider({
-  children,
-  initialLocale = "es",
-}: LanguageProviderProps) {
-  // The root layout inlines a locale script that reads the optimus-lang cookie
-  // and exposes it as <html data-locale>. On the client, prefer that value so
-  // the UI language matches the persisted cookie on first render. On the server
-  // (hydration phase) fall back to the server-seeded initialLocale.
-  const resolveInitial = (): Language => {
-    if (typeof document !== "undefined") {
-      const fromDom = document.documentElement.getAttribute(
-        "data-locale"
-      ) as Language | null;
-      if (fromDom === "en" || fromDom === "es") {
-        return fromDom;
-      }
-    }
-    return initialLocale;
-  };
+export function LanguageProvider({ children }: LanguageProviderProps) {
+  // Spanish is the only supported language. Always start in Spanish,
+  // regardless of cookie/localStorage/<html data-locale> legacy values.
+  const resolveInitial = (): Language => "es";
 
   const [language, setLanguageState] = useState<Language>(resolveInitial);
 
-  // One-time hydration sync for legacy landing visitors who stored
-  // `optimus-lang` in localStorage before the cookie layer existed. If it
-  // differs from the server-seeded cookie locale, adopt it and persist both.
-  useEffect(() => {
-    const stored = window.localStorage.getItem(
-      "optimus-lang"
-    ) as Language | null;
-    if ((stored === "en" || stored === "es") && stored !== initialLocale) {
-      setLanguageState(stored);
-      // biome-ignore lint/suspicious/noDocumentCookie: allowlist-enforced locale persistence; value is only "en"/"es", never attacker-controlled.
-      document.cookie = `${encodeURIComponent("optimus-lang")}=${encodeURIComponent(stored)}; path=/; max-age=${60 * 60 * 24 * 365}`;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on hydration
-  }, [initialLocale]);
-
-  const setLanguage = (lang: Language) => {
-    setLanguageState(lang);
-    window.localStorage.setItem("optimus-lang", lang);
-    document.documentElement.lang = lang;
-    document.documentElement.setAttribute("data-locale", lang);
-    document.title = DOCUMENT_TITLES[lang];
-
-    // Persist the locale server-side so SSR (html lang, metadata,
-    // server-rendered strings) stays in sync with the toggle (design D3).
-    // Fire-and-forget: never block the UI on the fetch. Respects the
-    // NEXT_PUBLIC_BASE_PATH used by other API fetches (IS_DEMO=1 -> /demo).
-    const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-    fetch(`${basePath}/api/locale`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lang }),
-    })
-      .then(() => undefined)
-      .catch(() => {
-        // Ignore network failures — localStorage + documentElement already applied.
-      });
+  const setLanguage = (_lang: Language) => {
+    // Spanish-only: ignore any attempt to switch away from "es".
+    const next: Language = "es";
+    setLanguageState(next);
+    document.documentElement.lang = next;
+    document.documentElement.setAttribute("data-locale", next);
+    document.title = DOCUMENT_TITLES[next];
   };
 
   useEffect(() => {

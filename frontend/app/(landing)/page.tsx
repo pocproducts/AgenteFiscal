@@ -17,13 +17,13 @@ export default function LandingPage() {
     <main className="relative min-h-screen overflow-x-hidden noise-overlay">
       <Navigation />
       <HeroSection />
-      <FeaturesSection />
+      {/*<FeaturesSection />*/}
       <HowItWorksSection />
-      <InfrastructureSection />
-      <MetricsSection />
-      <IntegrationsSection />
-      <SecuritySection />
-      <DevelopersSection />
+      {/*<InfrastructureSection />*/}
+      {/*<MetricsSection />*/}
+      {/*<IntegrationsSection />*/}
+      {/*<SecuritySection />*/}
+      {/*<DevelopersSection />*/}
       <TestimonialsSection />
       <PricingSection />
       <CtaSection />

@@ -78,17 +78,13 @@ const THEME_COLOR_SCRIPT = `\
   updateThemeColor();
 })();`;
 
-// Sets <html lang> from the persisted cookie before first paint, so SSR
-// stays locale-consistent without reading cookies() in the layout render
-// (which would make every route a blocking dynamic route in Next 16).
+// Spanish is the only supported language. Force <html lang> to "es" before
+// first paint, ignoring any legacy optimus-lang cookie.
 const LOCALE_SCRIPT = `\
 (function() {
   try {
-    var m = document.cookie.match(/(?:^|; )optimus-lang=([^;]*)/);
-    var lang = m ? decodeURIComponent(m[1]) : '';
-    if (lang !== 'en' && lang !== 'es') lang = 'es';
-    document.documentElement.lang = lang;
-    document.documentElement.setAttribute('data-locale', lang);
+    document.documentElement.lang = 'es';
+    document.documentElement.setAttribute('data-locale', 'es');
   } catch (e) {}
 })();`;
 
