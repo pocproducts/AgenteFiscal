@@ -24,6 +24,7 @@ const nextConfig: NextConfig = {
   },
   cacheComponents: true,
   devIndicators: false,
+  output: "standalone",
   poweredByHeader: false,
   reactCompiler: true,
   logging: {

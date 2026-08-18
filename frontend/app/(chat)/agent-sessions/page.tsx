@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Clock, Cpu, Tag, Target, UserIcon } from lucide-react;
+import { Activity, Clock, Cpu, Tag, Target, UserIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useAgentSidebar } from "@/hooks/use-agent-sidebar";
 import { useLiveClock } from "@/hooks/use-live-clock";
@@ -55,6 +55,14 @@ const getTaskSummary = (tasks: AgentTask[]): string => {
   if (pending > 0) parts.push(`${pending} pending`);
 
   return parts.length > 0 ? parts.join(", ") : "—";
+};
+
+// Helper to get last task label
+const getLastTaskLabel = (tasks: AgentTask[]): string => {
+  if (!tasks || tasks.length === 0) {
+    return "—";
+  }
+  return tasks[tasks.length - 1]?.label ?? "—";
 };
 
 export default function AgentSessionsPage() {

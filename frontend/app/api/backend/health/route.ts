@@ -4,7 +4,8 @@ import { BackendError, callBackend } from "@/lib/backend/client";
 
 // BFF proof route for the migration: forwards the user's Clerk JWT to the
 // Python backend (agente_fiscal) and returns its UnifiedResponse unchanged.
-export const runtime = "nodejs";
+// Runtime is Node.js by default; an explicit `runtime` export is incompatible
+// with nextConfig.cacheComponents in Next 16, so it stays implicit.
 
 interface BackendService {
   name: string;

@@ -74,12 +74,14 @@ Generado con [Archify](https://github.com/tt-a1i/archify) a partir del código r
 ## Estructura del monorepo
 
 ```
-├── dev.sh                      # Orquestador local: up/down/restart/status/logs/migrate/seed
+├── dev.sh                      # Orquestador local (dev): up/down/restart/status/logs/migrate/seed
+├── compose.sh                  # Orquestador Docker Compose: up/down/status/logs/build/migrate
+├── docker-compose.yml          # Stack local redis + backend + frontend (env_file de los .env)
 ├── package.json                # Raíz pnpm: scripts proxy al frontend
 ├── pnpm-workspace.yaml         # Paquetes: frontend, backend
 ├── vercel.json                 # { "framework": "nextjs" }
 ├── backend/
-│   ├── Dockerfile              # Multi-stage, uvicorn --workers 2 (solo backend; NO hay compose)
+│   ├── Dockerfile              # Multi-stage, uvicorn --workers 2 (lo usa docker-compose.yml y Fly)
 │   ├── pyproject.toml          # uv; python >=3.12
 │   ├── .env.example            # Plantilla de variables (64 líneas)
 │   ├── agente_fiscal/
@@ -367,7 +369,7 @@ El endpoint `GET /v1/system/features` refleja el estado en vivo de estos flags.
 ./dev.sh help
 ```
 
-`dev.sh` **levanta Redis local como daemon** (puerto 6379) solo si no hay uno respondiendo; su dump vive en `.run/redis/` (gitignored). El worker fiscal corre **in-process dentro de uvicorn**, así que `up` ya lo inicia. Requisitos: `backend/.venv` (con `uvicorn`/`alembic`), `pnpm`, `redis-server`, `backend/.env`, `frontend/.env.local`. Si falta Redis, el backend arranca degradado.
+`dev.sh` **levanta Redis local como daemon** (puerto 6379) solo si no hay uno respondiendo; su dump vive en `.run/redis/` (gitignored). El worker fiscal corre **in-process dentro de uvicorn**, así que `up` ya lo inicia. Requisitos: `backend/.venv` (con `uvicorn`/`alembic`), `pnpm`, `redis-server`, `backend/.env`, `frontend/.env`. Si falta Redis, el backend arranca degradado.
 
 ### Manual (sin dev.sh)
 
@@ -390,7 +392,7 @@ uv run python -m agente_fiscal worker
 ```bash
 pnpm install
 cd frontend
-# Crear .env.local con NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY, API_BASE_URL
+# Crear .env (ver .env.example) con NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY, API_BASE_URL
 pnpm dev
 ```
 
@@ -398,9 +400,38 @@ pnpm dev
 
 ---
 
+## Docker / docker-compose (local + Fly)
+
+Levanta el mismo stack que Fly (Redis + backend + frontend) en contenedores, reutilizando los secrets de los `.env` existentes. La **base de datos queda remota (Neon)**, igual que en Fly — no hay servicio Postgres en el compose.
+
+```bash
+./compose.sh up --build        # construye imágenes y levanta redis + backend (:8000) + frontend (:3000)
+./compose.sh status            # docker compose ps + health HTTP de ambos
+./compose.sh logs [backend|frontend|redis]
+./compose.sh migrate           # alembic upgrade head dentro del contenedor backend
+./compose.sh down / restart [--migrate] / build / help
+```
+
+- **Build args del frontend** (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `NEXT_PUBLIC_SENTRY_DSN`, `NEXT_PUBLIC_BASE_PATH`, `IS_DEMO`): `compose.sh` los lee de `frontend/.env` y `.env` (raíz) y los exporta **solo para la interpolación del compose**; no expone secretos.
+- **Secrets:** van por `env_file` (`./backend/.env`, `./frontend/.env`) dentro del compose. `compose.sh` nunca los exporta ni imprime.
+- **Volúmenes:** `redis-data` (RDB de Redis) y `af-storage` (`/app/agente_fiscal/storage` — PDFs generados). Los certs ARCA se montan en runtime desde `./backend/.certificados-arca` (solo lectura), excluidos del build.
+- **Overrides:** `REDIS_URL`/`MEMORY_REDIS_CACHE_URL` apuntan a `redis` (red de compose), `API_BASE_URL=http://backend:8000` para el BFF y `CORS_ORIGINS=http://localhost:3000`.
+- **Puertos ocupados:** si el stack de `dev.sh` sigue arriba, `compose.sh up` lo avisa — detenelo con `./dev.sh down`.
+
+**A Fly:** son los MISMOS Dockerfiles y `fly.toml`. El backend corre Alembic como `release_command`; los secrets se pasan con `fly secrets set ...` (ver `backend/.env.example`) y los `NEXT_PUBLIC_*` como build args en el deploy:
+
+```bash
+cd backend && fly deploy                    # backend (secrets ya seteados en la app)
+fly deploy . --config frontend/fly.toml \
+  --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxx \
+  --build-arg NEXT_PUBLIC_SENTRY_DSN=...    # frontend, contexto desde la raíz
+```
+
+---
+
 ## Variables de entorno
 
-**Frontend** (`frontend/.env.local` — no hay `.env.example` en frontend/):
+**Frontend** (`frontend/.env`, plantilla en `frontend/.env.example`):
 
 | Variable | Uso |
 |---|---|
@@ -439,8 +470,8 @@ pnpm dev
 
 ## Despliegue
 
-- **Backend:** `backend/Dockerfile` (multi-stage, `uvicorn … --workers 2`). **No hay `docker-compose.yml`** en el repo; el orquestado local es `dev.sh`. El worker corre in-process, así que un solo contenedor ya ejecuta API + worker. El reclamo `FOR UPDATE SKIP LOCKED` permite escalar a 2+ workers sin doble ejecución.
-- **Frontend:** Vercel (framework Next.js, ver `vercel.json`). Requiere `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` y `API_BASE_URL` apuntando al backend deployado.
+- **Backend:** `backend/Dockerfile` (multi-stage, `uvicorn … --workers 2`). Local: lo levanta `./compose.sh up` (docker-compose) o `dev.sh`. En Fly corre con `release_command = alembic upgrade head`. El worker corre in-process, así que un solo contenedor ya ejecuta API + worker. El reclamo `FOR UPDATE SKIP LOCKED` permite escalar a 2+ workers sin doble ejecución.
+- **Frontend:** Fly (`frontend/Dockerfile` standalone + `frontend/fly.toml`, ver sección Docker) o Vercel (framework Next.js, ver `vercel.json`). Requiere `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` y `API_BASE_URL` apuntando al backend deployado.
 - **Postgres:** Neon (pooled `DATABASE_URL` + unpooled `DATABASE_URL_UNPOOLED` para Alembic). Async SQLAlchemy.
 - **Redis:** requerido para rate-limit/JWKS/cache. Opcional en el arranque (degrada), pero **necesario en prod** para el comportamiento correcto de auth/rate-limit.
 - **PDFs:** se guardan como `content_bytes` en Postgres (`generated_pdfs`). No se usa object storage externo hoy (aunque `@vercel/blob` existe en el frontend para artifacts de UI).

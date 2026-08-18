@@ -1,0 +1,92 @@
+# docker-compose.yml — stack local de Agente Fiscal (redis + backend + frontend)
+#
+# Replica lo que corre en Fly pero localmente, reutilizando los secrets de los
+# .env existentes vía env_file (los valores nunca se hardcodean aquí).
+#
+# La base de datos queda REMOTA (Neon, igual que en Fly): no hay servicio
+# postgres aquí — DATABASE_URL / DATABASE_URL_UNPOOLED vienen de backend/.env.
+#
+# Uso: ./compose.sh up --build   (ver README, sección "Docker / docker-compose")
+
+name: agente-fiscal
+
+services:
+  # ── Redis: rate-limit, cache de JWKS y cola best-effort ──────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Backend: API FastAPI + worker in-process (uvicorn --workers 2) ───────
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      MEMORY_REDIS_CACHE_URL: redis://redis:6379/0
+      CORS_ORIGINS: http://localhost:3000
+      APP_ENV: production
+    volumes:
+      # Certs ARCA (produccion.crt/llave). Excluidos del build: se montan en
+      # runtime solo lectura y apuntan al directorio gitignoreado del host.
+      - ./backend/.certificados-arca:/app/.certificados-arca:ro
+      # PDFs generados (agente_fiscal/storage), excluidos del build.
+      - af-storage:/app/agente_fiscal/storage
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # Mismo healthcheck que backend/Dockerfile.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ── Frontend: Next.js standalone (BFF → backend en la red de compose) ────
+  #
+  # El contexto de build es la RAÍZ del repo porque Next.js pertenece al
+  # pnpm-workspace (ver frontend/Dockerfile). Los NEXT_PUBLIC_* se hornean en
+  # el bundle en build time: se pasan como build args desde compose.sh, que los
+  # lee de frontend/.env y .env (raíz) sin exportar secretos.
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}"
+        NEXT_PUBLIC_SENTRY_DSN: "${NEXT_PUBLIC_SENTRY_DSN:-}"
+        NEXT_PUBLIC_BASE_PATH: "${NEXT_PUBLIC_BASE_PATH:-}"
+        IS_DEMO: "${IS_DEMO:-0}"
+    restart: unless-stopped
+    env_file: ./frontend/.env
+    environment:
+      # Dentro de la red de compose el BFF llama al backend por nombre de
+      # servicio, no por localhost.
+      API_BASE_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    healthcheck:
+      # 127.0.0.1, no localhost: el server Next escucha IPv4 y en alpine
+      # localhost resuelve a ::1 primero (healthcheck fallaría siempre).
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  redis-data:
+  af-storage:

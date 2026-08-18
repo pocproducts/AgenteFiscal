@@ -1,0 +1,27 @@
+# .dockerignore — build context del FRONTEND (Next.js standalone)
+#
+# El Dockerfile del frontend se construye desde la raíz del repo porque
+# pertenece a un pnpm-workspace (necesita pnpm-workspace.yaml y pnpm-lock.yaml
+# + los package.json de los miembros del workspace). Este ignore reduce el
+# contexto enviado a Docker.
+#
+# El backend tiene su propio .dockerignore en backend/ y NO usa este archivo.
+.git
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+*.pyc
+.run
+.data
+docs
+backend/.certificados-arca
+.env
+.env.*
+.env*.local
+dump.rdb
+*.tsbuildinfo
+playwright-report
+test-results
+coverage
+sentry-release

@@ -1,0 +1,14 @@
+# frontend/.dockerignore — excluye del build context lo que no necesita la imagen
+node_modules
+.next
+out
+.vercel
+.env
+.env.*
+.env*.local
+pnpm-lock.yaml
+playwright-report
+test-results
+coverage
+*.tsbuildinfo
+sentry-release
