@@ -1,12 +1,14 @@
 # Agente Fiscal
 
-Plataforma SaaS para estudios contables argentinos: calendario de vencimientos ARCA (AFIP), asistente fiscal con chat, gestión de clientes por CUIT y pipeline de reportes con verificación de deuda, facilidades, registro e IIBB.
+Plataforma SaaS para estudios contables argentinos: calendario de vencimientos ARCA (AFIP), asistente fiscal con chat, gestión de clientes por CUIT y un pipeline de reportes fiscales (Padrón A5 → navegador → PDF → email) con aprobación humana.
+
+Este README es la **documentación operativa** del repositorio: arquitectura, estructura de código, autenticación, integraciones, modelo de datos, despliegue, variables de entorno y gotchas. Está pensado para que un agente DevOps (o un nuevo dev) entienda el sistema completo sin leer cada módulo.
 
 Monorepo con dos servicios separados:
 
 | Carpeta | Servicio | Stack |
 |---|---|---|
-| [`frontend/`](frontend/) | UI + BFF | Next.js 16 (App Router, Turbopack), React 19, AI SDK 6, Clerk, Tailwind 4, shadcn/ui, SWR |
+| [`frontend/`](frontend/) | UI + BFF (Backend-for-Frontend) | Next.js 16 (App Router, Turbopack), React 19, AI SDK 6, Clerk, Tailwind 4, shadcn/ui, SWR |
 | [`backend/`](backend/) | API + worker | Python 3.12, FastAPI, SQLAlchemy 2 async, Alembic, PostgreSQL (Neon), Redis, PyJWT |
 
 ---
@@ -14,145 +16,337 @@ Monorepo con dos servicios separados:
 ## Arquitectura
 
 ```
-                    ┌──────────────────────────────────────────────┐
-  Browser ────────► │ frontend/ (Next.js — Vercel)                 │
-                    │  · Clerk: login/registro, sesión, tenants     │
-                    │  · proxy.ts: clerkMiddleware protege rutas    │
-                    │  · BFF: auth() + getToken() → Bearer JWT      │
-                    └───────────────┬──────────────────────────────┘
-                                    │ HTTPS  Authorization: Bearer <JWT de Clerk>
-                                    ▼
-                    ┌──────────────────────────────────────────────┐
-                    │ backend/ (FastAPI — contenedor)              │
-                    │  · ClerkJWTExtractor verifica el token:      │
-                    │    HS256 (dev, CLERK_SECRET_KEY)             │
-                    │    RS256 (prod, JWKS de CLERK_DOMAIN,        │
-                    │           cache en Redis jwks:clerk)         │
-                    │  · Resuelve sub → users.clerk_user_id,       │
-                    │    org → tenants.clerk_org_id → tenant/plan  │
-                    └──────┬──────────────┬──────────────┬─────────┘
-                           │              │              │
+                    ┌──────────────────────────────────────────────────────┐
+  Browser ────────► │ frontend/ (Next.js — Vercel)                         │
+                    │  · Clerk: login/registro, sesión, tenants (Orgs)      │
+                    │  · proxy.ts: clerkMiddleware protege rutas            │
+                    │  · BFF (app/(chat)/api/*): auth() + getToken()        │
+                    │    → reenvía Authorization: Bearer <JWT de Clerk>     │
+                    │  · SSE: consume /v1/chat/message/stream y re-emite   │
+                    │    eventos de monitor de agente (live_url, steps)    │
+                    └───────────────────────┬──────────────────────────────┘
+                                            │ HTTPS  Authorization: Bearer <JWT>
+                                            ▼
+                    ┌──────────────────────────────────────────────────────┐
+                    │ backend/ (FastAPI — contenedor :8000)                │
+                    │  · AuthMiddleware: Bearer JWT (Clerk) O X-API-Key     │
+                    │    (fa_*) resuelta contra Postgres                    │
+                    │  · ClerkJWTExtractor: HS256 (dev) / RS256+JWKS (prod) │
+                    │    cache JWKS en Redis (jwks:clerk)                   │
+                    │  · TenantContextMiddleware: scoping por tenant_id     │
+                    │  · RateLimitMiddleware: Redis + plan (rpm/rpd)        │
+                    │  · Chat: ToolSpec registry (6 tools) + intent routing │
+                    │    → browser (Browserbase/Composio) o motor deter-   │
+                    │      minista (Padrón A5 / RulesEngine) + formatters   │
+                    │  · Worker IN-PROCESS (lifespan): cola report_runs,    │
+                    │    human-in-the-loop (waiting_approval)               │
+                    └──────┬──────────────┬──────────────┬─────────────────┘
                            ▼              ▼              ▼
-                      PostgreSQL       Redis        Object storage
-                      (Neon)          · rate limit   (S3/R2 — PDFs)
-                      · tenants       · JWKS cache
-                      · users         · ARCA TA cache
-                      · clients       · cola de jobs
-                      · report_runs   (worker)
-                      · billing_events
+                      PostgreSQL        Redis         (opcional) Object/
+                      (Neon)           · rate limit   Blob storage
+                      · tenants        · JWKS cache    (frontend artifacts)
+                      · users          · cola (best-   · Engram memory
+                      · clients          effort)
+                      · conversations
+                      · report_runs
+                      · generated_pdfs  (bytes en la DB)
+                      · billing_*
 ```
 
-### Autenticación (Clerk)
-
-Clerk es un proveedor de identidad externo (SaaS) — no se deploya ni en el frontend ni en el backend. Los dos se integran con él:
-
-1. **Frontend**: `ClerkProvider` + `proxy.ts` (`clerkMiddleware`) manejan la sesión del browser (login/registro, cambio de tenant con Organizations). El server de Next actúa de **BFF**: nunca expone `CLERK_SECRET_KEY` al cliente, solo `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
-2. **BFF → backend**: `frontend/lib/backend/client.ts` resuelve la sesión con `auth()` + `getToken()` y reenvía `Authorization: Bearer <JWT>` a la API.
-3. **Backend**: `backend/agente_fiscal/api/middleware/clerk.py` **verifica el JWT por su cuenta** — no confía en el frontend:
-   - **Dev**: HS256 contra `CLERK_SECRET_KEY`.
-   - **Prod**: RS256 contra el JWKS de `https://{CLERK_DOMAIN}/.well-known/jwks.json`, con cache de 1h en Redis (`jwks:clerk`) y fallback en memoria.
-   - Mapea `sub` → `users.clerk_user_id` y `org_id` → `tenants.clerk_org_id`, y scoping por `tenant_id`.
-
-> El backend es la única autoridad sobre "quién puede hacer qué". Si mañana hay app mobile o clientes API, se autentican igual: JWT de Clerk verificado en el backend.
+**Principios de diseño (backend):** arquitectura hexagonal. `domain/` (reglas de negocio, sin I/O), `ports/` (interfaces), `adapters/` (implementaciones: DB, browser, email, ARCA, memory). La API y el worker son los únicos que tocan adapters. Esto aisla la lógica fiscal de los proveedores externos (Clerk, Browserbase, Resend, ARCA).
 
 ---
 
 ## Estructura del monorepo
 
 ```
-├── frontend/                  # Next.js 16 (UI + BFF)
-│   ├── app/
-│   │   ├── (auth)/            # login, register, tenant
-│   │   ├── (chat)/            # chat, agent-sessions, analytics, settings, remote-browser
-│   │   ├── (landing)/         # landing pública
-│   │   ├── api/               # rutas BFF (chat, history, uploads, backend/health)
-│   │   └── ping/              # healthcheck para Playwright
-│   ├── lib/backend/client.ts  # BFF: JWT de Clerk → backend
-│   ├── lib/i18n/              # ES/EN (toggle por cookie optimus-lang)
-│   ├── proxy.ts               # clerkMiddleware (Next 16: middleware → proxy.ts)
-│   ├── tests/e2e/             # Playwright
-│   └── playwright.config.ts
-│
-├── backend/                   # Python/FastAPI
+├── dev.sh                      # Orquestador local: up/down/restart/status/logs/migrate/seed
+├── package.json                # Raíz pnpm: scripts proxy al frontend
+├── pnpm-workspace.yaml         # Paquetes: frontend, backend
+├── vercel.json                 # { "framework": "nextjs" }
+├── backend/
+│   ├── Dockerfile              # Multi-stage, uvicorn --workers 2 (solo backend; NO hay compose)
+│   ├── pyproject.toml          # uv; python >=3.12
+│   ├── .env.example            # Plantilla de variables (64 líneas)
 │   ├── agente_fiscal/
 │   │   ├── api/
-│   │   │   ├── middleware/clerk.py   # ClerkJWTExtractor (verificación JWT)
-│   │   │   ├── middleware/auth.py    # dependencia de auth + rate limit
-│   │   │   └── routes/               # chat, report, report_runs, clients, calendar, extract, admin…
-│   │   ├── domain/           # reglas de negocio (ARCA, IIBB, matching)
-│   │   ├── ports/            # contratos hexagonales (api_keys, clients, pdf, email, browser…)
-│   │   ├── adapters/         # implementaciones (DB, Resend, Composio, ReportLab)
-│   │   ├── db/               # SQLAlchemy async + modelos (users, tenants, clients, report_runs)
-│   │   ├── pipeline/         # pipeline fiscal: Padrón A5 → browser → PDF → email
-│   │   ├── worker/           # consumidor de cola (jobs asíncronos)
-│   │   ├── billing/          # planes y costos
-│   │   ├── chat/             # detección de intención + respuestas en español
-│   │   └── cli.py            # CLI batch (uv run python -m agente_fiscal)
-│   ├── alembic/              # migraciones de base de datos
-│   ├── pyproject.toml        # uv
-│   └── .env.example
+│   │   │   ├── server.py       # Entrada FastAPI (app v2.0.0), lifespan: Redis+PG+worker
+│   │   │   ├── middleware/     # clerk.py, auth.py, tenant.py, rate_limit.py, metrics.py
+│   │   │   └── routes/         # chat, conversations, clients, profiles, memory,
+│   │   │                        #   report, report_runs, calendar, extract, admin, monitor, health
+│   │   ├── domain/             # tool_spec, intent_router, response_builder, rules_engine,
+│   │   │                        #   tiers (planes), models, matching, cuit, approvals
+│   │   ├── ports/              # api_keys, arca, browser, browser_sessions, clients,
+│   │   │                        #   email, memory, pdf, profiles, settings
+│   │   ├── adapters/           # browser/ (composio,browserbase,mock,factory,task),
+│   │   │                        #   arca_ws (WSAA+Padrón A5), pdf_generator (ReportLab),
+│   │   │                        #   resend_email, memory/, db_* (persistencia)
+│   │   ├── pipeline/           # service.py: propuesta (gather+PDF) → ejecución (side-effects)
+│   │   ├── worker/             # runner.py: consumidor in-process (FOR UPDATE SKIP LOCKED)
+│   │   ├── db/                 # SQLAlchemy async + models/ (core, business) + seed, conversation_repo
+│   │   ├── billing/            # re-exporta domain/tiers
+│   │   ├── mcp/                # Servidor MCP (stdio/http) que expone las tools fiscales
+│   │   └── cli.py              # Typer CLI: run, report, deuda, discover, worker, validate…
+│   └── alembic/                # 7 migraciones (latest 0006_generated_pdfs_bytes)
 │
-└── openspec/                 # especificaciones SDD (cambios planificados/archivados)
+├── frontend/
+│   ├── app/
+│   │   ├── (auth)/             # login, register, tenant (widgets Clerk)
+│   │   ├── (chat)/             # chat, agent-sessions, remote-browser, analytics, settings
+│   │   │   └── api/            # BFF: chat (central), history, messages, mail, profiles…
+│   │   ├── (landing)/          # landing pública
+│   │   ├── api/                # backend/health, locale
+│   │   └── ping/               # healthcheck (GET → pong)
+│   ├── lib/
+│   │   ├── backend/client.ts   # BFF: JWT de Clerk → backend (callBackend / callBackendStream)
+│   │   ├── agent-window.ts     # 6 tool keys + matcher regex + window por tool
+│   │   └── i18n/               # ES/EN (cookie optimus-lang)
+│   ├── proxy.ts                # clerkMiddleware (Next 16 usa proxy.ts)
+│   ├── next.config.ts          # Sentry, botid, Turbopack cache, IS_DEMO basePath
+│   ├── playwright.config.ts    # E2E (Chrome, webServer /ping)
+│   └── package.json            # agente-fiscal-frontend v3.1.0
+│
+├── openspec/                   # Especificaciones SDD (cambios planificados/archivados)
+├── archivos md/               # Notas de planificación humanas (roadmaps)
+├── .run/                       # Artefactos runtime de dev.sh (pid/logs/redis) — gitignored
+└── .atl/                       # skill-registry (tooling de agentes, no es código app)
 ```
+
+> **Código muerto a ignorar:** `backend/ai/` es un módulo TypeScript (providers/prompts) del template original de chatbot; NO lo importa el backend Python (solo un alias de Vitest lo toca). `dump.rdb` en la raíz es un Redis stray; `dev.sh` usa `.run/redis/dump.rdb`.
+
+---
+
+## Backend
+
+### Entrada y middleware
+
+`api/server.py` crea la app FastAPI (título "Agente Fiscal API v2.0.0"). En el **lifespan** se conecta Redis (tolerante a caída, loop de reconexión de 30s), el engine de Postgres, se cablean los ports hexagonales y se arranca el **worker in-process** (`start_worker`). Orden de middleware (exterior→interior): `CORS → Metrics → Tenant → Auth → RateLimit → routes`. Si un integration-flag falla al inicializar, se levanta `IntegrationDisabledError` → **HTTP 503 `INTEGRATION_DISABLED`**.
+
+### Rutas (`api/routes/`)
+
+| Archivo | Endpoints principales |
+|---|---|
+| `health.py` | `GET /v1/health` (extendido) |
+| `chat.py` | `POST /v1/chat/message` (sync), `POST /v1/chat/message/stream` (SSE), `POST /v1/chat/wizard` (multi-turn SSE), `GET /v1/chat/reports/{filename}`, `POST /v1/chat/reports/send` |
+| `conversations.py` | `POST/GET /v1/conversations`, `GET/DELETE /v1/conversations/{id}` |
+| `clients.py` | CRUD de clientes por CUIT (`POST/GET`, `GET/PATCH/DELETE /v1/clients/{id}`) |
+| `profiles.py` | Identidad del tenant para reportes (`POST/GET`, `GET/PATCH/DELETE /v1/profiles/{id}`) |
+| `memory.py` | Memoria fiscal Engram (`GET /v1/memory/{cuit}`, `POST /v1/memory/observe`) |
+| `report.py` | `GET /v1/taxpayer/{cuit}`, `POST /v1/report` (pipeline legacy) |
+| `report_runs.py` | `POST /v1/report-runs` (enqueue), `GET /v1/report-runs/{id}`, `…/approve`, `…/reject` (human-in-the-loop) |
+| `calendar.py` | `POST /v1/calendar` |
+| `extract.py` | `POST /v1/extract` (extracción browser) |
+| `admin.py` | Self-service de developers/apps/API-keys (`/v1/admin/register`, `/v1/admin/apps`, `/v1/admin/keys`, `/v1/admin/api-keys/...`) |
+| `monitor.py` | `GET /v1/system/features`, `/v1/system/metrics`, `/v1/system/services`, `/v1/system/activity`, `/v1/system/errors` |
+
+### Chat: ToolSpec registry + intent routing
+
+El registry declarativo vive en `domain/tool_spec.py`:
+
+- `ToolSpec` (dataclass frozen): `tool_key`, `intent`, `keywords`, `task_flags`, `formatter_name`, `needs_browser`, `tool_name`.
+- `TOOL_SPECS`: **6 tool keys**; `INTENT_TO_KEY` es una biyección Intent→key.
+
+**Las 6 herramientas fiscales:**
+
+| tool_key | Intent | needs_browser | Fuente de datos | Formatter |
+|---|---|---|---|---|
+| `sistemaregistral` | `SISTEMA_REGISTRAL` | sí | Browserbase/Composio | `format_registro_response` |
+| `deudavencimientos` | `DEUDA_VENCIMIENTOS` | sí | browser | `format_deuda_response` |
+| `misfacilidades` | `MIS_FACILIDADES` | sí | browser | `format_facilidades_response` |
+| `rentascordoba` | `RENTAS_CORDOBA` | sí | browser (IIBB Córdoba) | `format_rentas_response` |
+| `consultaarca` | `CONSULTA_ARCA` | no | Padrón A5 (determinista) | `format_consultaarca_response` |
+| `calendariovencimientosarca` | `CALENDARIO_VENCIMIENTOS_ARCA` | no | RulesEngine (determinista) | `format_calendario_response` |
+
+Además, `informefiscal` (macro = todas las tools de datos) y `enviarmail` (envío) se manejan en el dispatch pero no son filas ToolSpec.
+
+**Routing de intención** (`domain/intent_router.py`): regex sobre el mensaje + extracción de CUIT; prioridad deuda→calendario→facilidades→rentas→consultaarca; `reporte` (pipeline completo) es el agregador; desconocido → ayuda.
+
+**Dispatch** (en `chat.py`): `_handle_tool_data` ramifica a `_run_browser_tool` (si `needs_browser`, llama `build_browser_tasks(**task_flags)` → `BrowserPort.run_single`, streamea `live_url`/`agent_step`) o `_run_engine_tool` (determinista: Padrón A5 / RulesEngine). Consolidado en `_handle_selected_tools_pipeline`. Los **formatters** producen markdown por tool en `domain/response_builder.py`.
+
+**Contrato SSE** (`/v1/chat/message/stream`, `/v1/chat/wizard`): `conversation_start` → `progress*` → (`live_url`, `agent_step`, `task_update` para tools browser) → `complete` (con `reply`, `data`, `conversation_id`, `pipeline_steps`, opcional `pdf_url`, `report_run_id`). Usa `asyncio.Queue` + `asyncio.to_thread` para el pipeline bloqueante.
+
+### Browser multi-backend (`adapters/browser/`)
+
+Registro de providers en `provider.py` (`PROVIDERS`: `composio`, `browserbase`, `mock`), seleccionado por `BROWSER_PROVIDER`. `browserbase.py` (Agents API, contexto persistente), `composio.py`, `mock.py` (local determinista), `factory.py` (`build_browser_tasks`), `task.py` (BrowserTask y subtasks), `iibb_router.py`, `workflows/`.
+
+**Sesiones persistentes:** la tabla `browser_sessions` guarda el contexto del provider por (tenant, profile); se adquiere/libra con `FOR UPDATE SKIP LOCKED` (TTL configurable). Esto permite reusar la sesión del navegador entre ejecuciones.
+
+### Pipeline y Worker
+
+`pipeline/service.py` implementa un flujo de **dos fases**:
+1. **Propuesta** (`run_proposal`): junta datos (Padrón A5 → RulesEngine → extracción browser opcional) y genera el PDF (ReportLab). No aplica side-effects.
+2. **Ejecución** (`execute_actions`): corre solo las acciones aprobadas (ej. enviar email).
+
+`worker/runner.py` es un runner async **in-process** (arrancado por el lifespan de FastAPI). `ReportRunner.claim_next_queued` usa `SELECT … FOR UPDATE SKIP LOCKED` para reclamo atómico (seguro bajo Docker `--workers 2`). Estados: `queued → running → done/failed/waiting_approval`. Acciones de riesgo pendientes parkan en `waiting_approval`; el admin aprueba y se re-encola para ejecutar solo lo aprobado. Tras `done`, persiste los bytes del PDF en Postgres.
+
+### Modelo de datos (SQLAlchemy async + Alembic)
+
+`db/models/`:
+- **core.py:** `Tenant`, `User`, `TenantMember`, `ApiKey` (hash sha256 de `key_hash`, nunca plaintext), `App`, `Plan`, `PlanPrice`, `Subscription`.
+- **business.py:** `Conversation`, `Message`, `Client` (tenant+CUIT), `Profile` (identidad tenant, gate para reportes), `BrowserSession` (contexto provider persistido), `ReportRun` (estado `queued/running/done/failed/waiting_approval`, `pending_actions`, `approved_by`), `GeneratedPdf` (LargeBinary `content_bytes` — **en Postgres**, no S3/R2), `BillingEvent`, `TokenPackage`, `TokenBalance`, `TokenTransaction`, `Invoice`, `Payment`.
+
+**Postgres es la fuente de verdad.** Redis solo cachea rate-limit, JWKS y conversaciones best-effort. Si Redis cae, el backend arranca degradado (el rate-limit pasa a pass-through, auth/Clerk siguen funcionando).
+
+### Billing, MCP y CLI
+
+- `billing/`/`domain/tiers.py`: planes `free` (50 contrib, flat $99), `pro` (10, $0.05/s browser), `pro_max` (200, $199), `enterprise` (unlimited, $299). Las tablas de suscripción/pago existen pero **no hay Stripe/MercadoPago cableado** en el código.
+- `mcp/`: servidor MCP (stdio o HTTP vía `MCP_TRANSPORT`/`MCP_PORT`) que expone las tools fiscales.
+- `cli.py` (Typer): `validate`, `generate-template`, `discover`, `run` (pipeline completo sobre `clients.yaml`), `deuda`, `report` (interactivo), `worker` (loop standalone).
+
+---
+
+## Frontend
+
+### Stack (verificado en `package.json`)
+
+Next.js **16.2.12** (App Router, Turbopack), React 19, TypeScript 5.6, Tailwind v4, shadcn/Radix, SWR 2.2, **Vercel AI SDK 6**, Clerk 6.39, Sentry 10, Playwright 1.50 (E2E), Vitest 4 (unit), Biome/ultracite. Packages de raíz y `agente-fiscal-frontend`.
+
+### Estructura y BFF
+
+- `app/(chat)/api/chat/route.ts` es el **BFF central**. Usa `createUIMessageStream`/`createUIMessageStreamResponse`.
+  - Si detecta un tool key (vía `lib/agent-window.ts`) o `informefiscal` → abre el monitor de agente de forma optimista (`data-agent-session-start` con `toolName`/`toolKey`/`windowMs`/`profileId`), llama `/v1/chat/message/stream` (SSE), y re-emite `data-agent-session-liveurl`, `data-agent-browser-step`, `data-agent-task-update`, luego el markdown como `text-delta`s, y `data-agent-session-complete`. La ventana queda abierta `windowMs` tras el comando.
+  - Si es mensaje no-tool / motor determinista → `callBackend("/v1/chat/message")` y hace stream del reply como deltas de texto.
+- `lib/backend/client.ts`: cliente BFF (server-only). `callBackend`/`callBackendStream` reenvían el JWT de la sesión Clerk como `Authorization: Bearer` a `API_BASE_URL` (default `http://localhost:8000`). Nunca se importa desde componentes cliente.
+- `lib/agent-window.ts`: única fuente de verdad de los 6 `tool_key`s, matchers regex, `TOOL_NAMES`, `TOOL_WINDOW_OVERRIDES` (ventana por tool en ms), `NO_MONITOR_TOOLS` (motores deterministas), `AGENT_SESSION_WINDOW_MS`.
+- `lib/i18n/`: ES/EN, locale en cookie `optimus-lang`, default ES.
+
+### Middleware y despliegue
+
+- `proxy.ts` (forma `proxy.ts` de Next 16): `clerkMiddleware` que redirige a `/login` en rutas chat/agent-sessions/analytics/settings/remote-browser si no hay sesión. Matcher cubre todo salvo internos/estáticos de Next.
+- `next.config.ts`: Sentry (`withSentryConfig`), botid, `cacheComponents`, `reactCompiler`, `IS_DEMO` (basePath `/demo`), Turbopack FS dev cache, patrones de blob.
+- `instrumentation.ts` + `sentry.{client,server,edge}.config.ts`.
+
+---
+
+## Autenticación y multi-tenancy
+
+Clerk es un proveedor de identidad externo (SaaS) — no se deploya. Los dos servicios se integran con él:
+
+1. **Frontend:** `ClerkProvider` + `proxy.ts` manejan la sesión del browser (login/registro, cambio de tenant con Organizations). El server de Next actúa de **BFF**: nunca expone `CLERK_SECRET_KEY` al cliente, solo `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
+2. **BFF → backend:** `lib/backend/client.ts` resuelve la sesión con `auth()` + `getToken()` y reenvía `Authorization: Bearer <JWT>`.
+3. **Backend:** `api/middleware/clerk.py` **verifica el JWT por su cuenta** — no confía en el frontend:
+   - **Dev:** HS256 contra `CLERK_SECRET_KEY`.
+   - **Prod:** RS256 contra el JWKS de `https://{CLERK_DOMAIN}/.well-known/jwks.json`, con cache de 1h en Redis (`jwks:clerk`) y fallback en memoria.
+   - Mapea `sub` → `users.clerk_user_id` y `org_id` → `tenants.clerk_org_id`, y scoping por `tenant_id`.
+
+**Doble vía de auth:** además del JWT de Clerk, los requests con header `X-API-Key` prefijado `fa_` se resuelven contra `ApiKeyPort` (Postgres) → tenant/app/developer/plan + scopes + `rate_limit_config`. Útil para integraciones server-to-server y el servidor MCP.
+
+> El backend es la única autoridad sobre "quién puede hacer qué". Si mañana hay app mobile o clientes API, se autentican igual: JWT de Clerk (o API key) verificado en el backend.
+
+---
+
+## Integraciones y feature flags
+
+Todas las integraciones externas están detrás de flags (en `config.py` / `.env`). **Por defecto están APAGADAS y devuelven 503 `INTEGRATION_DISABLED`** si se invocan sin habilitar. Esto es clave para el despliegue: el smoke test en prod debe prender los flags correctos.
+
+| Flag | Default | Qué habilita |
+|---|---|---|
+| `ARCA_ENABLED` | `false` | WSAA + Padrón A5 (SOAP/TA, `consultaarca`, `consultaarca` tool) |
+| `BROWSER_ENABLED` | `false` | Provider de navegador (deuda, facilidades, registral, rentas) |
+| `BROWSER_PROVIDER` | `browserbase` | `browserbase` \| `composio` \| `mock` |
+| `BROWSER_SESSION_TTL_SECONDS` | `3600` | TTL de sesiones persistentes |
+| `BROWSER_SESSION_REUSE` | `true` | Reusar contexto entre ejecuciones |
+| `PDF_ENABLED` | `true` | Generación de PDF (ReportLab) |
+| `MEMORY_ENABLED` | `true` | Memoria fiscal Engram (`MEMORY_*`) |
+
+El endpoint `GET /v1/system/features` refleja el estado en vivo de estos flags.
 
 ---
 
 ## Cómo correrlo localmente
 
-### Frontend (puerto 3000)
+### Recomendado: `dev.sh` (orquesta todo, no necesita compose)
 
 ```bash
-pnpm install
-cd frontend
-# Crear .env.local con las variables listadas abajo (no existe .env.example en frontend/).
-pnpm dev
+./dev.sh up [--migrate]     # Redis + backend (:8000, uvicorn, worker in-process) + frontend (:3000)
+./dev.sh status             # estado + health de los tres servicios
+./dev.sh logs [backend|frontend]
+./dev.sh migrate            # alembic upgrade head
+./dev.sh seed               # seed idempotente (tenants/plans iniciales)
+./dev.sh down / restart [--migrate]
+./dev.sh help
 ```
 
-Variables del frontend: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `API_BASE_URL` (default `http://localhost:8000`).
+`dev.sh` **levanta Redis local como daemon** (puerto 6379) solo si no hay uno respondiendo; su dump vive en `.run/redis/` (gitignored). El worker fiscal corre **in-process dentro de uvicorn**, así que `up` ya lo inicia. Requisitos: `backend/.venv` (con `uvicorn`/`alembic`), `pnpm`, `redis-server`, `backend/.env`, `frontend/.env.local`. Si falta Redis, el backend arranca degradado.
 
-> **Troubleshooting**: si la página recarga en loop, el cache de Turbopack (`frontend/.next`, hasta 6–7 GB) se corrompió. Parar el server, `rm -rf frontend/.next`, y `pnpm dev` de nuevo.
+### Manual (sin dev.sh)
 
-### Backend (puerto 8000)
-
+**Backend** (prepara el venv con uv):
 ```bash
 cd backend
-uv sync
-cp .env.example .env            # completar DATABASE_URL, REDIS_URL, CLERK_*
+uv sync                       # crea .venv
+cp .env.example .env          # completar DATABASE_URL, REDIS_URL, CLERK_*, flags
 uv run alembic upgrade head
 uv run uvicorn agente_fiscal.api.server:app --reload
 ```
-
-Workers/CLI:
-
+CLI / worker standalone:
 ```bash
 uv run python -m agente_fiscal --help
 uv run python -m agente_fiscal run --config clients.yaml
+uv run python -m agente_fiscal worker
 ```
+
+**Frontend:**
+```bash
+pnpm install
+cd frontend
+# Crear .env.local con NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY, API_BASE_URL
+pnpm dev
+```
+
+> **Troubleshooting Turbopack:** si la página recarga en loop, el cache de Turbopack (`frontend/.next`, puede crecer 6–7 GB) se corrompió. Parar el server, `rm -rf frontend/.next`, y `pnpm dev` de nuevo.
 
 ---
 
 ## Variables de entorno
 
-**Frontend** (`frontend/.env.local`):
+**Frontend** (`frontend/.env.local` — no hay `.env.example` en frontend/):
 
 | Variable | Uso |
 |---|---|
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clave pública de Clerk (cliente) |
 | `CLERK_SECRET_KEY` | Secreto del server Next (BFF) |
 | `API_BASE_URL` | URL del backend (default `http://localhost:8000`) |
+| `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | Sentry |
+| `IS_DEMO` | Habilita basePath `/demo` |
+| `E2E_CLERK_USER_EMAIL` / `E2E_CLERK_USER_PASSWORD` | Setup de Playwright (si falta, los tests se saltean) |
 
-**Backend** (`backend/.env`, ver [`backend/.env.example`](backend/.env.example)):
+**Backend** (`backend/.env`, plantilla en [`backend/.env.example`](backend/.env.example)):
 
-| Variable | Uso |
-|---|---|
-| `DATABASE_URL` / `DATABASE_URL_UNPOOLED` | Postgres (pooled para API, directa para Alembic) |
-| `REDIS_URL` | Cache, rate limit, cola de jobs |
-| `CLERK_SECRET_KEY` / `CLERK_DOMAIN` | Verificación de JWT (HS256 dev / JWKS prod) |
-| `COMPOSIO_API_KEY` | Browser remoto (Composio) |
-| `MEMORY_ENGRAM_URL` | Memoria por-CUIT (Engram, opcional) |
-| `RESEND_API_KEY` / `EMAIL_FROM` | Email de reportes |
-| `CORS_ORIGINS` | Orígenes permitidos |
-| `ESTUDIO_CUIT` / `ESTUDIO_CLAVE_FISCAL` / `CERT_DIR` | Credenciales ARCA (WSAA) |
+| Variable | Default | Uso |
+|---|---|---|
+| `DATABASE_URL` / `DATABASE_URL_UNPOOLED` | `''` | Postgres (pooled para API, directa para Alembic) |
+| `REDIS_URL` | `redis://localhost:6379/0` | Cache, rate limit, cola |
+| `MEMORY_REDIS_CACHE_URL` | `redis://localhost:6379/0` | Cache de memoria Engram |
+| `MEMORY_REDIS_MAX_MB` | `25` | Tope de cache |
+| `CLERK_SECRET_KEY` / `CLERK_DOMAIN` | `''` | Verificación JWT (HS256 dev / JWKS prod) |
+| `CORS_ORIGINS` | `http://localhost:3000,3001` | Orígenes permitidos (comma-separated) |
+| `RESEND_API_KEY` / `EMAIL_FROM` | `''` | Email de reportes |
+| `COMPOSIO_API_KEY` | `''` | Browser remoto (Composio) |
+| `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` | `''` | Browserbase |
+| `ESTUDIO_CUIT` / `ESTUDIO_CLAVE_FISCAL` | `20324837796` / `''` | Credenciales ARCA (WSAA) |
+| `CERT_DIR` | `.certificados-arca` | Certs ARCA (`produccion.crt`/`produccion.key`) — gitignored |
+| `ARCA_PROXY_URL` | — | Proxy opcional para WSAA |
+| `SENTRY_DSN` / `APP_ENV` | `''` / `development` | Telemetría |
+| `MCP_TRANSPORT` / `MCP_PORT` | `stdio` / `8000` | Servidor MCP |
+| `ARCA_ENABLED` | `false` | WSAA/Padrón A5 |
+| `BROWSER_ENABLED` / `BROWSER_PROVIDER` | `false` / `browserbase` | Navegador |
+| `BROWSER_SESSION_TTL_SECONDS` / `BROWSER_SESSION_REUSE` | `3600` / `true` | Sesiones browser |
+| `PDF_ENABLED` | `true` | Generación de PDF |
+| `MEMORY_ENABLED` | `true` | Memoria Engram |
+
+---
+
+## Despliegue
+
+- **Backend:** `backend/Dockerfile` (multi-stage, `uvicorn … --workers 2`). **No hay `docker-compose.yml`** en el repo; el orquestado local es `dev.sh`. El worker corre in-process, así que un solo contenedor ya ejecuta API + worker. El reclamo `FOR UPDATE SKIP LOCKED` permite escalar a 2+ workers sin doble ejecución.
+- **Frontend:** Vercel (framework Next.js, ver `vercel.json`). Requiere `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` y `API_BASE_URL` apuntando al backend deployado.
+- **Postgres:** Neon (pooled `DATABASE_URL` + unpooled `DATABASE_URL_UNPOOLED` para Alembic). Async SQLAlchemy.
+- **Redis:** requerido para rate-limit/JWKS/cache. Opcional en el arranque (degrada), pero **necesario en prod** para el comportamiento correcto de auth/rate-limit.
+- **PDFs:** se guardan como `content_bytes` en Postgres (`generated_pdfs`). No se usa object storage externo hoy (aunque `@vercel/blob` existe en el frontend para artifacts de UI).
+- **Flags en prod:** prender `ARCA_ENABLED`, `BROWSER_ENABLED` y los proveedor keys según corresponda; de lo contrario esos endpoints devuelven 503.
+- **CORS:** actualizar `CORS_ORIGINS` con los dominios deployados (default localhost).
+- **TLS/Ingress:** el SSE de `/v1/chat/message/stream` es de larga duración (el BFF usa timeout de 600s) — el proxy/ingress debe permitir conexiones SSE largas.
 
 ---
 
@@ -160,16 +354,41 @@ uv run python -m agente_fiscal run --config clients.yaml
 
 | Suite | Comando | Qué cubre |
 |---|---|---|
-| Frontend E2E (Playwright) | `pnpm test` | Páginas de auth, flujos de UI |
-| Frontend unit (Vitest) | `pnpm --filter agente-fiscal-frontend test:unit` | Utilidades y errores |
-| Backend (pytest) | `cd backend && uv run pytest` | API, reglas, adapters |
+| Frontend E2E (Playwright) | `pnpm test` (o `pnpm --filter agente-fiscal-frontend test`) | Auth, flujos de UI; levanta dev server, espera `/ping`. Se saltea si faltan creds E2E de Clerk. |
+| Frontend unit (Vitest) | `pnpm test:unit` (`vitest run`) | `lib/*.test.ts` (agent-window, cuit, errors, utils). Alias `@/lib/ai → ../backend/ai`. |
+| Backend (pytest) | `cd backend && uv run pytest` | API, reglas, adapters, tool_spec, intent_router, rules_engine, aislamiento multitenant, api_keys/clients, browser provider, report runner/approval, features, arca_ws, db_browser_sessions. Usa `fakeredis` + Postgres de test. |
 
-Playwright levanta el dev server automáticamente (o reusa uno existente) y espera a que `/ping` responda.
+---
+
+## Observabilidad
+
+- **Sentry:** cableado en web (`withSentryConfig`, `instrumentation.ts`) y Python (`telemetry.py`, init en server + worker). Necesita `SENTRY_*` / `NEXT_PUBLIC_SENTRY_DSN` o corre silencioso.
+- **Endpoints de sistema** (`monitor.py`): `GET /v1/system/features` (estado de flags), `/v1/system/metrics`, `/v1/system/services`, `/v1/system/activity`, `/v1/system/errors`.
+- **Health:** backend `GET /v1/health`; frontend `GET /ping` (usado por `dev.sh` y Playwright).
+
+---
+
+## Gotchas operacionales (léelo antes de deployar)
+
+1. **Redis es best-effort, no fuente de verdad.** Postgres tiene tenants/clients/plans/API keys/conversaciones/PDFs. Redis = rate-limit + JWKS + cache. Si cae, el backend arranca degradado. `dump.rdb` en la raíz es un stray; `dev.sh` usa `.run/redis/dump.rdb`.
+2. **Integraciones default OFF.** `ARCA_ENABLED=false`, `BROWSER_ENABLED=false`, `PDF_ENABLED=true`. Invocarlas apagadas → **503 `INTEGRATION_DISABLED`**. El deploy de prod debe prenderlas.
+3. **PDFs en Postgres, no S3/R2.** `GeneratedPdf.content_bytes` es LargeBinary. El docstring original decía S3/R2 pero hoy están en la DB. Clarificar antes de agregar R2.
+4. **Clerk HS256/RS256 blur.** `clerk.py` cae a HS256 (dev `CLERK_SECRET_KEY`) incluso en la ruta RS256/JWKS. En prod asegurar `CLERK_DOMAIN` + tipo de clave correcto; un mismatch dev/prod aceptará HS256 silenciosamente.
+5. **CORS** con `allow_credentials=True` — actualizar `CORS_ORIGINS` para dominios deployados.
+6. **Worker in-process** en el lifespan de uvicorn. `dev.sh up` ya lo arranca. Bajo Docker `--workers 2`, el reclamo `FOR UPDATE SKIP LOCKED` previene doble ejecución (se agregó tras un bug real de doble corrida).
+7. **SSE de larga duración** en `/v1/chat/message/stream` — el ingress/proxy debe permitir conexiones largas (timeout 600s en el BFF).
+8. **Rate limit** Redis-backed y por plan (rpm/rpd). Sin Redis → pass-through (sin límite), no crashea.
+9. **`backend/ai/` es código muerto** (TS del template original); ignorarlo.
+10. **`use-remote-browsers` aún no tiene fetcher al backend** — la tabla remote-browser renderiza esqueleto/vacío (TODO frontend).
+11. **`.certificados-arca/` y `storage/` son gitignored** — provisionar certs ARCA out-of-band; el pipeline lee `CERT_DIR`.
+12. **Certificados ARCA** requieren `ESTUDIO_CUIT` + `ESTUDIO_CLAVE_FISCAL` + `CERT_DIR` con `produccion.crt`/`produccion.key` para que `ARCA_ENABLED` funcione de verdad.
 
 ---
 
 ## Documentación relacionada
 
-- [`ARCHITECTURE-ROADMAP.md`](ARCHITECTURE-ROADMAP.md) — roadmap de la UI y backend-readiness
-- [`BACKEND-MIGRATION.md`](BACKEND-MIGRATION.md) — plan de migración del backend (strangler fig)
+- [`archivos md/ARCHITECTURE-ROADMAP.md`](archivos%20md/ARCHITECTURE-ROADMAP.md) — roadmap de UI y backend-readiness
+- [`archivos md/BACKEND-MIGRATION.md`](archivos%20md/BACKEND-MIGRATION.md) — plan de migración del backend (strangler fig)
 - [`openspec/`](openspec/) — especificaciones y cambios SDD
+- [`backend/.env.example`](backend/.env.example) — plantilla de variables del backend
+- [`dev.sh`](dev.sh) — comentarios de cabecera con toda la superficie de comandos
