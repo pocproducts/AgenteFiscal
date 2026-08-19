@@ -24,10 +24,10 @@
 
 ## Phase 3: P2 — Deletion UX (PR 3)
 
-- [ ] 3.1 `frontend/app/(chat)/api/chat/route.ts`: DELETE 404→`{success:false,deleted:false}`; `saveConversation`→PATCH (CD-3)
-- [ ] 3.2 `frontend/lib/backend/conversations.ts`: `deleted:false` on 404; `patchConversationTitle` (CD-3)
-- [ ] 3.3 `frontend/components/chat/sidebar-history.tsx`: await DELETE; error toast; reconcile; invalidate; navigate active (CD-4)
-- [ ] 3.4 vitest + e2e delete/failure cases (CD-3/4)
+- [x] 3.1 `frontend/app/(chat)/api/chat/route.ts`: DELETE 404→`{success:false,deleted:false}`; `saveConversation`→PATCH (CD-3)
+- [x] 3.2 `frontend/lib/backend/conversations.ts`: `deleted:false` on 404; `patchConversationTitle` (CD-3)
+- [x] 3.3 `frontend/components/chat/sidebar-history.tsx`: await DELETE; error toast; reconcile; invalidate; navigate active (CD-4)
+- [x] 3.4 vitest + e2e delete/failure cases (CD-3/4)
 
 ## Phase 4: P3 — Landing light theme (PR 4)
 
