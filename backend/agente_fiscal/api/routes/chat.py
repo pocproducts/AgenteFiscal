@@ -63,6 +63,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -72,6 +73,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from uuid import UUID
 
+from agente_fiscal.adapters.db_agent_sessions import PostgresAgentSessionsRepository
 from agente_fiscal.api.profile_gate import ActiveProfileContext, validate_active_profile
 from agente_fiscal.api.store import RedisStore
 from agente_fiscal.db.conversation_repo import (
@@ -90,7 +92,9 @@ from agente_fiscal.domain.response_builder import (
 	format_reporte_response,
 	format_taxpayer_response,
 )
+from agente_fiscal.domain.session_tasks import build_session_tasks
 from agente_fiscal.domain.tool_spec import INTENT_TO_KEY, TOOL_SPECS, ToolSpec
+from agente_fiscal.ports.agent_sessions import AgentSession
 
 router = APIRouter()
 
@@ -157,6 +161,11 @@ class ChatRequest(BaseModel):
 	profile_id: UUID | None = Field(
 		default=None,
 		description='Active tenant profile required to generate a report (REPORTE_COMPLETO intent)',
+	)
+	message_id: str | None = Field(
+		default=None,
+		description='Opaque message identifier assigned by the frontend; '
+		'persisted on the agent_sessions row (AST-4), defaults to None for API/CLI callers',
 	)
 
 
@@ -301,7 +310,7 @@ async def _persist_conversation(
 				user_id = await session.scalar(
 					select(User.id).where(User.clerk_user_id == clerk_user_id).limit(1)
 				)
-			await upsert_conversation(
+			result = await upsert_conversation(
 				session,
 				tenant_id=tenant_uuid,
 				user_id=user_id,
@@ -311,8 +320,73 @@ async def _persist_conversation(
 				messages=messages,
 				status=status,
 			)
+		if result is None:
+			# CD-2: la conversación fue borrada (tombstone, ADR-5) — el upsert
+			# NO la resucita. El flujo lo trata como missing-conversation.
+			logger.info(
+				'Conversación %s borrada durante el stream — se saltea la persistencia del turno',
+				conversation_id,
+			)
+			return False
+		return True
 	except Exception as exc:
 		logger.warning('No se pudo persistir la conversación %s en Postgres: %s', conversation_id, exc)
+		return False
+
+
+async def _persist_agent_session(
+	fastapi_request: Request,
+	*,
+	tool: str,
+	message_id: str | None,
+	conversation_id: str,
+	tenant_id: uuid.UUID | None,
+	profile_id: UUID | None,
+	status: str,
+	tasks: list[dict[str, Any]],
+	cost_cents: int = 0,
+	session_id: str | None = None,
+	started_at: datetime | None = None,
+	completed_at: datetime | None = None,
+) -> None:
+	"""Persiste UNA fila de telemetría ``agent_sessions`` (best-effort, AST-2/3).
+
+	Mirrors ``_persist_conversation``: sin factory o sin tenant se saltea; los
+	fallos de DB se loguean y el stream SSE nunca se rompe (ADR-3). El row se
+	escribe POST-run (nunca desde callbacks del provider): ``started_at`` captura
+	el dispatch ("Comenzó") y ``completed_at`` el retorno → duración = round-trip.
+	"""
+	factory = getattr(fastapi_request.app.state, 'session_factory', None)
+	if factory is None or not tenant_id:
+		return
+	try:
+		clerk_user_id = getattr(fastapi_request.state, 'clerk_user_id', None)
+		user_id: UUID | None = None
+		if clerk_user_id:
+			async with factory() as session:
+				user_id = await session.scalar(
+					select(User.id).where(User.clerk_user_id == clerk_user_id).limit(1)
+				)
+		repo = PostgresAgentSessionsRepository(factory)
+		await repo.record(
+			AgentSession(
+				id=str(uuid.uuid4()),
+				tool=tool,
+				message_id=message_id,
+				conversation_id=conversation_id,
+				profile_id=str(profile_id) if profile_id else None,
+				tenant_id=str(tenant_id),
+				user_id=str(user_id) if user_id else None,
+				session_id=session_id,
+				status=status,
+				tasks=tasks,
+				cost_cents=cost_cents,
+				started_at=started_at,
+				completed_at=completed_at,
+			)
+		)
+	except Exception as exc:
+		logger.warning('No se pudo persistir la sesión de agente %s: %s', tool, exc)
 
 
 async def _persist_chat_pdf(
@@ -490,14 +564,42 @@ def _run_browser_tool(
 			cliente_cuit=cuit,
 			**spec.task_flags,
 		)
+		_metrics_holder: dict[str, Any] = {}
+
+		def _real_metrics(metrics: dict) -> None:
+			# Propaga al caller (holder last-write + SSE) solo si algo se emitió;
+			# _metrics_holder local permite detectar providers sin telemetría.
+			_metrics_holder.update(metrics)
+			if on_task_metrics:
+				on_task_metrics(metrics)
+
 		out = browser.run_single(
 			ClientConfig(cuit=cuit),
 			tasks=tasks,
 			echo_func=echo_func,
 			on_live_url=on_live_url,
 			on_step=on_step,
-			on_task_metrics=on_task_metrics,
+			on_task_metrics=_real_metrics,
 		)
+		# ADR-7: Composio no emite métricas por callback (run_single lo ignora).
+		# Resuelve session_id + event_count vía telemetría API post-run —
+		# best-effort, nunca falla; mock queda con session_id NULL por diseño.
+		if not _metrics_holder and hasattr(browser, '_api_key'):
+			from agente_fiscal.adapters.browser.composio_telemetry import ComposioTelemetry
+
+			run = ComposioTelemetry(browser._api_key).resolve_run()
+			if run:
+				_run_metrics: dict[str, Any] = {}
+				if run.get('session_id'):
+					_run_metrics['session_id'] = run['session_id']
+				if run.get('event_count'):
+					_run_metrics['tasks'] = build_session_tasks(
+						spec.tool_key or spec.tool_name,
+						'completed',
+						count=int(run['event_count']),
+					)
+				if _run_metrics and on_task_metrics:
+					on_task_metrics(_run_metrics)
 	except Exception as exc:
 		return {'error': 'BROWSER_ERROR', 'detail': str(exc)}
 
@@ -1419,6 +1521,7 @@ async def chat_message_stream(
 	"""
 	message = request.message
 	conversation_id = request.conversation_id or str(uuid.uuid4())
+	message_id = request.message_id
 	tenant_id = getattr(fastapi_request.state, 'tenant_id', None)
 	store: RedisStore | None = getattr(fastapi_request.app.state, 'store', None)
 
@@ -1553,8 +1656,10 @@ async def chat_message_stream(
 			_loop.call_soon_threadsafe(queue.put_nowait, ('agent_step', {'step': step, 'goal': goal, 'url': url, 'status': status}))
 
 		def _on_task_metrics(metrics: dict) -> None:
-			# Síncrono (corre en to_thread): solo encola; el persist async se
-			# hace en _generate_tool cuando drena el evento 'task_metrics'.
+			# Síncrono (corre en to_thread): actualiza el holder last-write y
+			# solo encola; el persist async se hace en _generate_tool cuando
+			# drena el evento 'task_metrics'.
+			_last_metrics.update(metrics)  # thread-safe last-write holder (ADR-3)
 			_loop.call_soon_threadsafe(queue.put_nowait, ('task_metrics', metrics))
 
 		async def _persist_task_metrics(metrics: dict) -> None:
@@ -1595,8 +1700,20 @@ async def chat_message_stream(
 			except Exception as exc:
 				logger.warning('No se pudo persistir la sesión de browser: %s', exc)
 
+		# Thread-safe last-write holder para métricas del provider (Browserbase):
+		# el callback corre en el hilo del to_thread; el run se lee post-dispatch.
+		_last_metrics: dict[str, Any] = {}
+
 		async def _run_tool():
 			try:
+				# ADR-3: started_at captura el dispatch ("Comenzó"); completed_at
+				# se mide al retornar → duración = round-trip del tool run.
+				# Alias local: chat_message_stream enlaza SU PROPIO 'datetime'
+				# (rama REPORTE_COMPLETO) — un closure sobre esa local no asociada
+				# crashea con 'free variable not found' si la rama no corrió.
+				from datetime import datetime as _dt_run, timezone as _tz_run
+
+				started_at = _dt_run.now(_tz_run.utc)
 				if spec.needs_browser:
 					data = await asyncio.to_thread(
 						_run_browser_tool,
@@ -1611,6 +1728,25 @@ async def chat_message_stream(
 					)
 				else:
 					data = await asyncio.to_thread(_run_engine_tool, spec, cuit, _progress)
+				completed_at = _dt_run.now(_tz_run.utc)
+				# AST-2: una fila por run, status completed|error desde el dict.
+				_run_status = 'error' if (data and data.get('error')) else 'completed'
+				_tool_key = spec.tool_key or spec.tool_name
+				# Browser: session_id real del provider (last-write holder);
+				# engine: sin sesión (NULL, AST-3). Tasks: métricas reales si el
+				# provider las dio, si no el template DEFAULT (7 para consultaarca).
+				_browser_session_id = (
+					(_last_metrics.get('session_id') or '').strip() or None
+					if spec.needs_browser
+					else None
+				)
+				_metric_tasks = _last_metrics.get('tasks') or []
+				_tasks = build_session_tasks(
+					_tool_key,
+					_run_status,
+					count=len(_metric_tasks) if _metric_tasks else None,
+				)
+				_cost = int(_last_metrics.get('cost_cents') or 0) if spec.needs_browser else 0
 				reply = _resolve_formatter(spec.formatter_name)(data, cuit)
 				safe_data = _json_safe(data)
 				if tenant_id and store is not None:
@@ -1636,6 +1772,22 @@ async def chat_message_stream(
 					],
 					profile_id=request.profile_id,
 					status='done',
+				)
+				# Telemetría agent_sessions (AST-2/3, ADR-3): persist POST-run,
+				# best-effort — la DB nunca rompe el SSE.
+				await _persist_agent_session(
+					fastapi_request,
+					tool=_tool_key,
+					message_id=message_id,
+					conversation_id=conversation_id,
+					tenant_id=UUID(str(tenant_id)) if tenant_id else None,
+					profile_id=request.profile_id,
+					status=_run_status,
+					tasks=_tasks,
+					cost_cents=_cost,
+					session_id=_browser_session_id,
+					started_at=started_at,
+					completed_at=completed_at,
 				)
 				complete_payload: dict[str, Any] = {'reply': reply, 'data': safe_data, 'conversation_id': conversation_id}
 				# Mismo canal FIFO que progress/live_url/agent_step (call_soon_threadsafe):
