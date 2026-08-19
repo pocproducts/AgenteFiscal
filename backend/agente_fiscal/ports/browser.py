@@ -23,10 +23,19 @@ class BrowserRunnerPort(Protocol):
 		echo_func: Optional[Callable[[str], None]] = None,
 		on_live_url: Optional[Callable[[str], None]] = None,
 		on_step: Optional[Callable[[int, str, str, str], None]] = None,
+		on_task_metrics: Optional[Callable[[dict], None]] = None,
 	) -> DeudaOutput:
 		"""Run the given browser tasks for one client. Returns a DeudaOutput, never raises.
 
 		``cliente`` may be ``None`` (the MCP tool passes only ``tasks``).
+
+		``on_task_metrics`` is a SYNCHRONOUS callback for real run metrics
+		(session_id, context_id, duration_ms, cost_cents, tasks): the dispatch
+		passes it unconditionally (AST-5), so EVERY provider must accept it —
+		providers without telemetry (composio, mock) accept-and-ignore, and the
+		``agent_sessions`` row is written post-run by the backend anyway (ADR-3).
+		The callback runs on the calling thread (inside ``to_thread``) and must
+		never raise.
 		"""
 		...
 
