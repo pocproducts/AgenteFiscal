@@ -61,6 +61,8 @@ const SUBTASK_TEMPLATES: Record<string, string[]> = {
     "Fetching taxpayer profile",
     "Retrieving tax obligations",
     "Validating response schema",
+    "Consulting payment obligations",
+    "Cross-checking due dates",
     "Formatting output",
   ],
   // `sistemaregistral` removed: the live streaming flow (`app/(chat)/api/chat/route.ts`)
