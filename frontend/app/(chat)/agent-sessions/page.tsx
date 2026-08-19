@@ -2,7 +2,7 @@
 
 import { Activity, Clock, Cpu, Tag, Target, UserIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { useAgentSidebar } from "@/hooks/use-agent-sidebar";
+import { useAgentSessions } from "@/hooks/use-agent-sessions";
 import { useLiveClock } from "@/hooks/use-live-clock";
 import { useProfiles } from "@/hooks/use-profiles";
 import { formatClock } from "@/lib/agent-window";
@@ -27,6 +27,8 @@ type AgentSession = {
   totalCostCents: number;
   startedAt?: number;
   completedAt?: number;
+  /** Provider session id from the persisted row; engines keep it empty (AST-3). */
+  sessionId?: string;
 };
 
 // Helper to get profile name
@@ -38,25 +40,6 @@ const getProfileName = (profileId: string | undefined): string => {
   return profileId;
 };
 
-// Helper to get task summary
-const getTaskSummary = (tasks: AgentTask[]): string => {
-  if (!tasks || tasks.length === 0) {
-    return "—";
-  }
-  const running = tasks.filter((t) => t.status === "running").length;
-  const completed = tasks.filter((t) => t.status === "completed").length;
-  const failed = tasks.filter((t) => t.status === "error").length;
-  const pending = tasks.length - running - completed - failed;
-
-  const parts: string[] = [];
-  if (running > 0) parts.push(`${running} running`);
-  if (completed > 0) parts.push(`${completed} completed`);
-  if (failed > 0) parts.push(`${failed} failed`);
-  if (pending > 0) parts.push(`${pending} pending`);
-
-  return parts.length > 0 ? parts.join(", ") : "—";
-};
-
 // Helper to get last task label
 const getLastTaskLabel = (tasks: AgentTask[]): string => {
   if (!tasks || tasks.length === 0) {
@@ -66,12 +49,12 @@ const getLastTaskLabel = (tasks: AgentTask[]): string => {
 };
 
 export default function AgentSessionsPage() {
-  const { allSessions } = useAgentSidebar();
+  const { sessions } = useAgentSessions();
   const { profiles } = useProfiles();
   const { t } = useLanguage();
   const dict = t.panel.pages.dashboards;
 
-  const sortedSessions: AgentSession[] = [...allSessions].sort(
+  const sortedSessions: AgentSession[] = [...sessions].sort(
     (a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0)
   );
 
@@ -101,7 +84,7 @@ export default function AgentSessionsPage() {
               <tr>
                 <th className="px-5 py-3.5 font-medium">
                   <div className="flex items-center gap-1.5">
-                    <Target className="size-4 shrink-0" /> {getTaskSummary(sortedSessions[0]?.tasks ?? [])}
+                    <Target className="size-4 shrink-0" /> {dict.acciones}
                   </div>
                 </th>
                 <th className="px-5 py-3.5 font-medium">
@@ -147,19 +130,33 @@ export default function AgentSessionsPage() {
                   ? new Date(s.startedAt).toLocaleString()
                   : "—";
 
+                // Acciones: task count + last label from the persisted JSONB
+                // (AST-3 — engines persist the canonical 7 defaults).
+                const acciones =
+                  s.tasks.length > 0
+                    ? `${s.tasks.length} · ${getLastTaskLabel(s.tasks)}`
+                    : "—";
+
                 return (
                   <tr
                     className="hover:bg-muted/10 transition-colors"
                     key={s.agentId ?? i}
                   >
-                    <td className="px-5 py-4 text-foreground font-medium flex items-center gap-2">
-                      <span
-                        className={`h-2 w-2 rounded-full ${s.status === "running" ? "bg-amber-400 animate-pulse" : s.status === "completed" ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
-                      />
-                      Ejecutar {s.toolName}
+                    <td className="px-5 py-4 text-foreground">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-medium flex items-center gap-2">
+                          <span
+                            className={`h-2 w-2 rounded-full ${s.status === "running" ? "bg-amber-400 animate-pulse" : s.status === "completed" ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
+                          />
+                          Ejecutar {s.toolName}
+                        </span>
+                        <span className="text-[10px] pl-4 text-muted-foreground font-mono">
+                          {acciones}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-5 py-4 font-mono text-xs text-muted-foreground">
-                      {s.agentId}
+                      {s.sessionId ?? "—"}
                     </td>
                     <td className="px-5 py-4">
                       <Badge
