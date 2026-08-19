@@ -17,8 +17,9 @@ import {
   callBackendStream,
 } from "@/lib/backend/client";
 import {
+  buildDeleteChatResponse,
   deleteConversation,
-  saveConversation,
+  patchConversationTitle,
 } from "@/lib/backend/conversations";
 import { ChatbotError, type ErrorCode } from "@/lib/errors";
 import { tenantKey } from "@/lib/tenant";
@@ -583,10 +584,17 @@ export async function POST(request: Request) {
               : `Consulta Fiscal — ${timestamp}`;
             dataStream.write({ type: "data-chat-title", data: title });
             // The backend persisted the conversation itself (user + assistant,
-            // status done). Only the final title is BFF-owned: upsert it so
-            // the sidebar shows the friendly title instead of the default.
+            // status done). Only the final title is BFF-owned: PATCH it so the
+            // sidebar shows the friendly title. PATCH never creates (CD-2) —
+            // a deleted chat yields `{ok:false}` and the title is not saved.
             try {
-              await saveConversation({ id, title });
+              const { ok } = await patchConversationTitle(id, title);
+              if (!ok) {
+                console.error(
+                  "Chat title not saved: conversation missing or deleted:",
+                  id
+                );
+              }
             } catch (titleErr) {
               console.error("Failed to save chat title:", titleErr);
             }
@@ -622,15 +630,15 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    await deleteConversation(chatId);
-    return Response.json({ success: true }, { status: 200 });
-  } catch (err) {
-    // The backend returns 404 both for missing chats and for chats the caller
-    // may not delete; treat it as a successful no-op so the sidebar removes
-    // the row regardless.
-    if (err instanceof BackendError && err.status === 404) {
-      return Response.json({ success: true }, { status: 200 });
+    const { deleted } = await deleteConversation(chatId);
+    if (!deleted) {
+      // CD-3 honest failure: the backend 404s missing, already-deleted, or
+      // cross-tenant chats. Never swallow it as a successful no-op — the
+      // client must keep the row and surface an error.
+      return Response.json(buildDeleteChatResponse(false), { status: 404 });
     }
+    return Response.json(buildDeleteChatResponse(true), { status: 200 });
+  } catch (err) {
     const { detail } = describeBackendError(err);
     const code =
       err instanceof BackendError ? backendErrorToCode(err) : "offline:chat";

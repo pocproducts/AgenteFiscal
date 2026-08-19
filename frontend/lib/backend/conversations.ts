@@ -61,10 +61,9 @@ export async function getConversation(
   id: string
 ): Promise<BackendConversation | null> {
   try {
-    return await callBackend<BackendConversation>(
-      `/v1/conversations/${id}`,
-      { timeoutMs: 60_000 }
-    );
+    return await callBackend<BackendConversation>(`/v1/conversations/${id}`, {
+      timeoutMs: 60_000,
+    });
   } catch (err) {
     if (err instanceof BackendError && err.status === 404) {
       return null;
@@ -73,12 +72,34 @@ export async function getConversation(
   }
 }
 
-/** Hard-delete one conversation. Backend returns 204 with an empty body. */
-export async function deleteConversation(id: string): Promise<void> {
-  await callBackend<void>(`/v1/conversations/${id}`, {
-    method: "DELETE",
-    timeoutMs: 60_000,
-  });
+export interface DeleteConversationResult {
+  /** true when the backend actually tombstoned the conversation row. */
+  deleted: boolean;
+}
+
+/**
+ * Delete one conversation. The backend tombstones it (204), or 404s when the
+ * row is missing, already deleted, or not deletable by the caller.
+ *
+ * CD-3 honest 404: a 404 is a REAL failure result (`deleted: false`), never a
+ * swallowed success — the BFF turns it into `{success:false, deleted:false}`
+ * and the sidebar keeps the row instead of hiding it.
+ */
+export async function deleteConversation(
+  id: string
+): Promise<DeleteConversationResult> {
+  try {
+    await callBackend<void>(`/v1/conversations/${id}`, {
+      method: "DELETE",
+      timeoutMs: 60_000,
+    });
+    return { deleted: true };
+  } catch (err) {
+    if (err instanceof BackendError && err.status === 404) {
+      return { deleted: false };
+    }
+    throw err;
+  }
 }
 
 /** Delete every conversation the caller may delete; returns the count. */
@@ -90,30 +111,44 @@ export async function deleteAllConversations(): Promise<number> {
   return typeof res?.deleted === "number" ? res.deleted : 0;
 }
 
-export interface SaveConversationInput {
-  id: string;
-  title?: string;
-  messages?: Array<{ role: string; content: string }>;
-  profileId?: string | null;
+export interface PatchConversationTitleResult {
+  /** false when the conversation does not exist (deleted) — never created. */
+  ok: boolean;
 }
 
 /**
- * Upsert a conversation. Used by the BFF only where it owns real data (e.g.
- * updating the final chat title); message persistence itself is done by the
- * backend inside /v1/chat/message{,/stream} — the BFF must NOT write messages
- * through this to avoid duplicating what the backend already stored.
+ * Rename an existing conversation (CD-2). Maps to the backend PATCH
+ * /v1/conversations/{id} — title-only and NEVER creates a row — replacing the
+ * old POST saveConversation, which could resurrect a deleted chat. A 404 here
+ * means the chat was deleted (or never existed): returned as `{ok:false}` so
+ * the BFF logs it without re-creating anything.
  */
-export async function saveConversation(
-  input: SaveConversationInput
-): Promise<void> {
-  await callBackend<{ conversation_id: string }>("/v1/conversations", {
-    method: "POST",
-    body: {
-      id: input.id,
-      ...(input.title !== undefined ? { title: input.title } : {}),
-      ...(input.messages !== undefined ? { messages: input.messages } : {}),
-      ...(input.profileId ? { profile_id: input.profileId } : {}),
-    },
-    timeoutMs: 60_000,
-  });
+export async function patchConversationTitle(
+  id: string,
+  title: string
+): Promise<PatchConversationTitleResult> {
+  try {
+    await callBackend<{ conversation_id: string }>(`/v1/conversations/${id}`, {
+      method: "PATCH",
+      body: { title },
+      timeoutMs: 60_000,
+    });
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof BackendError && err.status === 404) {
+      return { ok: false };
+    }
+    throw err;
+  }
+}
+
+/** BFF DELETE envelope (CD-3): success only when the backend really deleted. */
+export interface DeleteChatResponse {
+  success: boolean;
+  deleted: boolean;
+}
+
+/** Build the BFF DELETE envelope from the backend deletion result (CD-3). */
+export function buildDeleteChatResponse(deleted: boolean): DeleteChatResponse {
+  return { success: deleted, deleted };
 }
