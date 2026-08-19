@@ -28,6 +28,7 @@ from agente_fiscal.db.conversation_repo import (
 	delete_conversation as repo_delete_conversation,
 	get_conversation as repo_get_conversation,
 	list_conversations as repo_list_conversations,
+	patch_conversation_title as repo_patch_conversation_title,
 	upsert_conversation as repo_upsert_conversation,
 )
 from agente_fiscal.db.models import User
@@ -225,13 +226,16 @@ async def get_conversation(request: Request, conversation_id: str):
 @router.delete(
 	'/v1/conversations/{conversation_id}',
 	status_code=204,
-	summary='Delete a conversation',
+	summary='Delete a conversation (tombstone)',
 )
 async def delete_conversation(request: Request, conversation_id: str):
-	"""Remove a conversation and its messages (CASCADE).
+	"""Tombstone delete (ADR-5/CD-1): marca ``deleted_at``, no borra filas.
 
 	404 both when the conversation does not exist and when the caller lacks
-	permission — existence and permission are not distinguished to the client.
+	permission — existence and permission are not distinguished, and a second
+	DELETE on an already-deleted conversation reports 404 (honest: nothing to
+	delete). The row stays in Postgres; every read/upsert filters it out, so a
+	deleted chat can never reappear or be resurrected by title saves (CD-2).
 	"""
 	tenant_id = _tenant_uuid(request)
 	factory = _get_session_factory(request)
@@ -248,6 +252,39 @@ async def delete_conversation(request: Request, conversation_id: str):
 	if not deleted:
 		raise _not_found()
 	return JSONResponse(status_code=204, content=None)
+
+
+@router.patch(
+	'/v1/conversations/{conversation_id}',
+	status_code=200,
+	summary='Rename a conversation title (never creates)',
+)
+async def patch_conversation_title(request: Request, conversation_id: str, body: dict):
+	"""Update ONLY the title of an existing conversation (CD-2).
+
+	Replaces the BFF ``saveConversation`` POST for renames: this endpoint
+	**never creates** a row — renaming a non-existent (or deleted) conversation
+	returns 404 instead of resurrecting it (honest, no data re-creation). The
+	first turn of a new chat is always persisted by the stream before the BFF
+	title-save runs, so a 404 here means the chat was deleted.
+	"""
+	tenant_id = _tenant_uuid(request)
+	factory = _get_session_factory(request)
+
+	title = (body.get('title') or '').strip()
+	if not title:
+		raise _not_found(code='MISSING_TITLE', message='Field "title" is required')
+
+	async with factory() as session:
+		updated = await repo_patch_conversation_title(
+			session,
+			tenant_id=tenant_id,
+			conversation_id=conversation_id,
+			title=title,
+		)
+	if not updated:
+		raise _not_found()
+	return JSONResponse(content={'conversation_id': conversation_id})
 
 
 @router.delete(

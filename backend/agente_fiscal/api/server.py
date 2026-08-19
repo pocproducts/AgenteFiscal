@@ -30,6 +30,7 @@ from agente_fiscal.api.middleware import (
 )
 from agente_fiscal.api.routes import (
 	admin,
+	agent_sessions,
 	calendar,
 	chat,
 	clients,
@@ -346,3 +347,4 @@ app.include_router(profiles.router, tags=['profiles'])
 app.include_router(monitor.router, tags=['system'])
 app.include_router(chat.router, tags=['chat'])
 app.include_router(conversations.router)
+app.include_router(agent_sessions.router)
