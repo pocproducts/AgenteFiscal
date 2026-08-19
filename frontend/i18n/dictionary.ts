@@ -379,6 +379,7 @@ export const translations = {
         cancel: "Cancel",
         continue: "Continue",
         chatDeleted: "Chat deleted",
+        chatDeletedError: "Could not delete the chat. Please try again.",
         more: "More",
         share: "Share",
         delete: "Delete",
@@ -1270,6 +1271,7 @@ export const translations = {
         cancel: "Cancelar",
         continue: "Continuar",
         chatDeleted: "Chat eliminado",
+        chatDeletedError: "No se pudo eliminar el chat. Inténtalo de nuevo.",
         more: "Más",
         share: "Compartir",
         delete: "Eliminar",
@@ -1304,7 +1306,8 @@ export const translations = {
       },
       agentLaunch: {
         cuitLabel: "CUIT del contribuyente",
-        cuitPlaceholder: "Ingresá el CUIT y elegí las herramientas para ejecutar…",
+        cuitPlaceholder:
+          "Ingresá el CUIT y elegí las herramientas para ejecutar…",
         cuitInvalid: "El CUIT debe tener 11 dígitos",
         cuitHint: "Elegí al menos una herramienta fiscal para ejecutar",
         launching: "Iniciando un chat nuevo con este agente…",

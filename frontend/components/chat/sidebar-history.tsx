@@ -2,7 +2,7 @@
 
 import { isToday, isYesterday, subMonths, subWeeks } from "date-fns";
 import { motion } from "framer-motion";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import useSWRInfinite from "swr/infinite";
 import { toast } from "@/components/chat/toast";
@@ -23,6 +23,7 @@ import {
   SidebarMenu,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { reconcileChatsAfterDelete } from "@/lib/chat/delete-reconcile";
 import type { Chat } from "@/lib/db/schema";
 import { useLanguage } from "@/lib/i18n";
 import type { PanelUser } from "@/lib/shared/db-types";
@@ -103,6 +104,7 @@ export function SidebarHistory({ user }: { user: PanelUser | undefined }) {
   const { setOpenMobile } = useSidebar();
   const { t } = useLanguage();
   const pathname = usePathname();
+  const router = useRouter();
   const id = pathname?.startsWith("/chat/") ? pathname.split("/")[2] : null;
   const nav = t.panel.sidebar;
 
@@ -128,26 +130,54 @@ export function SidebarHistory({ user }: { user: PanelUser | undefined }) {
     ? paginatedChatHistories.every((page) => page.chats.length === 0)
     : false;
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     const chatToDelete = deleteId;
 
     setShowDeleteDialog(false);
+    if (!chatToDelete) {
+      return;
+    }
 
-    mutate((chatHistories) => {
-      if (chatHistories) {
-        return chatHistories.map((chatHistory) => ({
-          ...chatHistory,
-          chats: chatHistory.chats.filter((chat) => chat.id !== chatToDelete),
-        }));
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chat?id=${chatToDelete}`,
+        { method: "DELETE" }
+      );
+      const body = (await res.json().catch(() => null)) as {
+        success?: boolean;
+        deleted?: boolean;
+      } | null;
+
+      if (!res.ok || body?.success !== true || body.deleted !== true) {
+        // CD-3 honest failure (backend 404 double-delete, 5xx, network):
+        // reconcile to server truth instead of hiding the row, and surface a
+        // visible error toast — never report success for a failed delete.
+        await mutate();
+        toast({ description: nav.chatDeletedError, type: "error" });
+        return;
       }
-    });
 
-    fetch(
-      `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chat?id=${chatToDelete}`,
-      { method: "DELETE" }
-    );
+      // CD-4 success: remove the row from every page, then invalidate so the
+      // list reconciles with server truth (the row is gone there too).
+      await mutate((chatHistories) =>
+        chatHistories
+          ? reconcileChatsAfterDelete(chatHistories, chatToDelete)
+          : chatHistories
+      );
 
-    toast({ description: nav.chatDeleted, type: "success" });
+      if (id === chatToDelete) {
+        // The deleted chat was the active one: navigate away to the app Home
+        // so the UI never keeps a dead chat open as active.
+        router.push("/chat");
+      }
+
+      toast({ description: nav.chatDeleted, type: "success" });
+    } catch (err) {
+      // Network failure: keep the row, reconcile to server truth, error toast.
+      console.error("Failed to delete chat:", err);
+      await mutate();
+      toast({ description: nav.chatDeletedError, type: "error" });
+    }
   };
 
   if (!user) {
