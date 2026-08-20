@@ -31,15 +31,7 @@ type AgentSession = {
   sessionId?: string;
 };
 
-// Helper to get profile name
-const getProfileName = (profileId: string | undefined): string => {
-  if (!profileId) {
-    return "—";
-  }
-  // En producción, esto vendría del state de profiles
-  return profileId;
-};
-
+// Remove the stub helper — profile names are resolved from the profiles hook.
 // Helper to get last task label
 const getLastTaskLabel = (tasks: AgentTask[]): string => {
   if (!tasks || tasks.length === 0) {
@@ -57,6 +49,11 @@ export default function AgentSessionsPage() {
   const sortedSessions: AgentSession[] = [...sessions].sort(
     (a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0)
   );
+
+  const profileNameById = (profileId: string | undefined): string => {
+    if (!profileId) return "—";
+    return profiles.find((p) => p.id === profileId)?.name ?? "—";
+  };
 
   // Live wall-clock: the duration column ticks in real time while any session
   // is running, matching the chat sidebar clock.
@@ -156,14 +153,14 @@ export default function AgentSessionsPage() {
                       </div>
                     </td>
                     <td className="px-5 py-4 font-mono text-xs text-muted-foreground">
-                      {s.sessionId ?? "—"}
+                      {s.sessionId ?? "-"}
                     </td>
                     <td className="px-5 py-4">
                       <Badge
                         className="py-0.5 px-2 font-medium text-xs border-muted-foreground/20 bg-muted/40"
                         variant="outline"
                       >
-                        {getProfileName(s.profileId)}
+                        {profileNameById(s.profileId)}
                       </Badge>
                     </td>
                     <td className="px-5 py-4 text-muted-foreground text-xs">
@@ -176,12 +173,20 @@ export default function AgentSessionsPage() {
                       ${totalCostUsd.toFixed(3)}
                     </td>
                     <td className="px-5 py-4">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-foreground font-medium text-xs">
-                          {getLastTaskLabel(s.tasks)}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground font-mono">
-                          {dict.statusLabel} {s.status.toUpperCase()}
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-block h-2 w-2 rounded-full ${
+                            s.status === "running"
+                              ? "bg-amber-400 animate-pulse"
+                              : s.status === "completed"
+                                ? "bg-emerald-500"
+                                : s.status === "error"
+                                  ? "bg-red-500"
+                                  : "bg-muted-foreground/40"
+                          }`}
+                        />
+                        <span className="text-foreground font-medium text-xs uppercase">
+                          {s.status}
                         </span>
                       </div>
                     </td>

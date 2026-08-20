@@ -1512,7 +1512,7 @@ export const translations = {
           startedAt: "Comenzó",
           duration: "Duración",
           cost: "Costo",
-          status: "Estado / Última tarea",
+          status: "Estado",
           running: "Ejecutando...",
           initializing: "Inicializando",
           statusLabel: "Estado:",
