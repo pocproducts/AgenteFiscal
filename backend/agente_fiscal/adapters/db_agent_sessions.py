@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
 from typing import Any, Sequence
 
 from sqlalchemy import select
@@ -71,6 +72,36 @@ class PostgresAgentSessionsRepository:
 				completed_at=session.completed_at,
 			)
 			db.add(row)
+			await db.commit()
+
+	async def complete(
+		self,
+		session_id: str,
+		*,
+		status: str,
+		tasks: list[dict[str, Any]],
+		completed_at: datetime,
+		cost_cents: int = 0,
+	) -> None:
+		"""Completar una fila iniciada en el dispatch (status running → terminal).
+
+		El row ya existe (lo creó ``record`` con status ``running`` antes de que
+		la tool ejecutara): esta carga por primary key (``id``) y actualiza SOLO
+		``status``/``tasks``/``completed_at``/``cost_cents`` — nunca toca la
+		tool, los ids de mensaje/conversación ni ``started_at``. Raise on
+		failure (o si la fila no existe) — el caller best-effort (chat.py)
+		captura y loguea sin romper el stream.
+		"""
+		async with self._session_factory() as db:
+			row = await db.get(AgentSessionRow, uuid.UUID(str(session_id)))
+			if row is None:
+				raise ValueError(
+					f'agent session {session_id} no existe — nunca se inició'
+				)
+			row.status = status
+			row.tasks = tasks
+			row.completed_at = completed_at
+			row.cost_cents = cost_cents
 			await db.commit()
 
 	async def list_for(

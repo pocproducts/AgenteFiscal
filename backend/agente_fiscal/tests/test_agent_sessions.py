@@ -29,6 +29,8 @@ from agente_fiscal.adapters.browser.composio_telemetry import (
 )
 from agente_fiscal.adapters.db_agent_sessions import PostgresAgentSessionsRepository
 from agente_fiscal.db.models import AgentSession as AgentSessionRow
+from agente_fiscal.db.models import Conversation as ConversationRow
+from agente_fiscal.db.models import Message as MessageRow
 from agente_fiscal.domain.session_tasks import (
     CONSULTAARCA_TASKS,
     build_session_tasks,
@@ -114,6 +116,64 @@ async def test_record_with_none_for_all_optionals_is_accepted(
     async with test_session_factory() as session:
         rows = (await session.execute(select(AgentSessionRow))).scalars().all()
     assert len(rows) == 1
+
+
+# ── start/complete: complete() only touches terminal fields ────────────────
+
+
+async def test_repo_complete_updates_only_terminal_fields(
+    test_session_factory, make_tenant
+) -> None:
+    """``complete`` actualiza la MISMA fila: solo status/tasks/completed_at/
+    cost_cents cambian; tool/ids/tenant/started_at quedan intactos."""
+    async with test_session_factory() as session:
+        tenant = await make_tenant(session)
+    repo = PostgresAgentSessionsRepository(test_session_factory)
+    started = datetime(2026, 8, 19, 10, 0, tzinfo=timezone.utc)
+    running = _session(
+        tenant_id=str(tenant.id),
+        status='running',
+        started_at=started,
+        completed_at=None,
+    )
+    await repo.record(running)
+
+    completed = started + timedelta(seconds=5)
+    terminal_tasks = [{'task': 'task-0', 'label': 'CUIT', 'status': 'completed'}]
+    await repo.complete(
+        running.id,
+        status='completed',
+        tasks=terminal_tasks,
+        completed_at=completed,
+        cost_cents=7,
+    )
+
+    async with test_session_factory() as session:
+        rows = (await session.execute(select(AgentSessionRow))).scalars().all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.status == 'completed'
+    assert row.tasks == terminal_tasks
+    assert row.completed_at == completed
+    assert row.cost_cents == 7
+    assert row.tool == running.tool
+    assert row.message_id == running.message_id
+    assert row.conversation_id == running.conversation_id
+    assert row.tenant_id == tenant.id
+    assert row.profile_id is None
+    assert row.started_at == started
+
+
+async def test_repo_complete_raises_when_row_missing(test_session_factory) -> None:
+    """Fila inexistente -> raise (el caller best-effort captura y loguea)."""
+    repo = PostgresAgentSessionsRepository(test_session_factory)
+    with pytest.raises(ValueError):
+        await repo.complete(
+            str(uuid.uuid4()),
+            status='completed',
+            tasks=[],
+            completed_at=datetime(2026, 8, 19, 10, 5, tzinfo=timezone.utc),
+        )
 
 
 # ── AST-2: one row per run, list returns them newest-first ──────────────────
@@ -364,6 +424,196 @@ async def test_chat_persist_skips_without_factory_or_tenant(
 
     async with test_session_factory() as session:
         count = (await session.execute(select(func.count()).select_from(AgentSessionRow))).scalar_one()
+    assert count == 0
+
+
+async def test_chat_persist_start_skips_without_factory_or_tenant(
+    test_session_factory, make_tenant
+) -> None:
+    """Best-effort del start: sin factory → None, sin row, sin raise (ADR-3)."""
+    from agente_fiscal.api.routes.chat import _persist_agent_session_start
+
+    async with test_session_factory() as session:
+        tenant = await make_tenant(session)
+    app = FastAPI()  # no session_factory
+
+    assert (
+        await _persist_agent_session_start(
+            _fake_request(app),
+            tool='consultaarca',
+            message_id='msg-x',
+            conversation_id='conv-x',
+            tenant_id=tenant.id,
+            profile_id=None,
+        )
+        is None
+    )
+    assert (
+        await _persist_agent_session_start(
+            _fake_request(app),
+            tool='consultaarca',
+            message_id='msg-x',
+            conversation_id='conv-x',
+            tenant_id=None,
+            profile_id=None,
+        )
+        is None
+    )
+
+    async with test_session_factory() as session:
+        count = (await session.execute(select(func.count()).select_from(AgentSessionRow))).scalar_one()
+    assert count == 0
+
+
+async def test_chat_persist_start_then_complete_is_one_row(
+    test_session_factory, make_tenant, make_user
+) -> None:
+    """start (running) al dispatch + complete post-run → UNA MISMA fila que
+    pasa de running a completed sin duplicarse (AST-2/3, ADR-3)."""
+    from agente_fiscal.api.routes.chat import (
+        _persist_agent_session,
+        _persist_agent_session_start,
+    )
+
+    async with test_session_factory() as session:
+        tenant = await make_tenant(session)
+        await make_user(session, clerk_user_id='user_1')
+    app = FastAPI()
+    app.state.session_factory = test_session_factory
+    request = _fake_request(app)
+
+    sid = await _persist_agent_session_start(
+        request,
+        tool='consultaarca',
+        message_id='msg-x',
+        conversation_id='conv-x',
+        tenant_id=tenant.id,
+        profile_id=None,
+    )
+    assert sid is not None
+
+    async with test_session_factory() as session:
+        running_rows = (await session.execute(select(AgentSessionRow))).scalars().all()
+    assert len(running_rows) == 1
+    assert running_rows[0].status == 'running'
+    assert running_rows[0].tasks == []
+    assert running_rows[0].completed_at is None
+    assert running_rows[0].started_at is not None
+
+    completed = datetime(2026, 8, 19, 10, 5, tzinfo=timezone.utc)
+    await _persist_agent_session(
+        request,
+        tool='consultaarca',
+        agent_session_id=sid,
+        message_id='msg-x',
+        conversation_id='conv-x',
+        tenant_id=tenant.id,
+        profile_id=None,
+        status='completed',
+        tasks=build_session_tasks('consultaarca', 'completed'),
+        started_at=running_rows[0].started_at,
+        completed_at=completed,
+    )
+
+    async with test_session_factory() as session:
+        rows = (await session.execute(select(AgentSessionRow))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].status == 'completed'
+    assert rows[0].completed_at == completed
+    assert rows[0].started_at == running_rows[0].started_at
+    assert len(rows[0].tasks) == 7
+
+
+# ── Chat conversation persist at dispatch (running) + complete (done) ───────
+
+
+async def test_chat_persist_start_then_done_is_one_row(
+    test_session_factory, make_tenant, make_user
+) -> None:
+    """``_persist_conversation_start`` (running) al dispatch + ``_persist_conversation``
+    post-run (done) → UNA MISMA fila con user+assistant, sin duplicar el
+    mensaje de usuario (idempotente por role/content, AST-2/3, ADR-3)."""
+    from agente_fiscal.api.routes.chat import (
+        _persist_conversation,
+        _persist_conversation_start,
+    )
+
+    async with test_session_factory() as session:
+        tenant = await make_tenant(session)
+        await make_user(session, clerk_user_id='user_1')
+    app = FastAPI()
+    app.state.session_factory = test_session_factory
+    request = _fake_request(app, tenant_id=tenant.id)
+
+    await _persist_conversation_start(
+        request, 'conv-x', 'consulta arca 20123456789', profile_id=None
+    )
+
+    async with test_session_factory() as session:
+        running_rows = (await session.execute(select(ConversationRow))).scalars().all()
+        running_msgs = (
+            (await session.execute(select(MessageRow).where(MessageRow.conversation_id == running_rows[0].id)))
+            .scalars()
+            .all()
+        )
+    assert len(running_rows) == 1
+    assert running_rows[0].status == 'running'
+    assert len(running_msgs) == 1
+    assert running_msgs[0].role == 'user'
+    assert running_msgs[0].parts.get('content') == 'consulta arca 20123456789'
+
+    await _persist_conversation(
+        request,
+        'conv-x',
+        [
+            {'role': 'user', 'content': 'consulta arca 20123456789'},
+            {'role': 'assistant', 'content': 'Contribuyente ACME SA'},
+        ],
+        profile_id=None,
+        status='done',
+    )
+
+    async with test_session_factory() as session:
+        rows = (await session.execute(select(ConversationRow))).scalars().all()
+        msgs = (
+            (await session.execute(select(MessageRow).where(MessageRow.conversation_id == rows[0].id)))
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1
+    assert rows[0].status == 'done'
+    assert {m.role for m in msgs} == {'user', 'assistant'}
+    assert len(msgs) == 2
+
+
+async def test_chat_persist_start_skips_without_factory_or_tenant(
+    test_session_factory, make_tenant
+) -> None:
+    """Best-effort del start: sin factory o sin tenant → no row, no raise
+    (ADR-3: la persistencia nunca rompe el stream)."""
+    from agente_fiscal.api.routes.chat import _persist_conversation_start
+
+    async with test_session_factory() as session:
+        tenant = await make_tenant(session)
+    app = FastAPI()  # no session_factory
+
+    await _persist_conversation_start(
+        _fake_request(app, tenant_id=tenant.id),
+        'conv-x',
+        'consulta arca 20123456789',
+        profile_id=None,
+    )
+    await _persist_conversation_start(
+        _fake_request(app),
+        'conv-x',
+        'consulta arca 20123456789',
+        profile_id=None,
+    )
+
+    async with test_session_factory() as session:
+        count = (
+            await session.execute(select(func.count()).select_from(ConversationRow))
+        ).scalar_one()
     assert count == 0
 
 

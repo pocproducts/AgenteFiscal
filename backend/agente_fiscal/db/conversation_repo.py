@@ -200,6 +200,7 @@ async def list_conversations(
 		{
 			'id': str(c.id),
 			'title': c.title or 'Nueva conversación',
+			'status': c.status,
 			'messageCount': len(by_conv[c.id]),
 			'updatedAt': c.updated_at.isoformat() if c.updated_at else None,
 			'preview': _preview(by_conv[c.id]),
