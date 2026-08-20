@@ -72,4 +72,4 @@ async def list_agent_sessions(
 			conversation_id=conversation_id,
 			limit=limit,
 		)
-	return JSONResponse(content=[s.model_dump() for s in sessions])
+	return JSONResponse(content=[s.model_dump(mode='json') for s in sessions])
