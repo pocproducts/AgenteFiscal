@@ -118,14 +118,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
 
-  const [input, setInput] = useState("");
+const [input, setInput] = useState("");
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
-
-  // Revalidates the sidebar history list the first time a chunk streams in
-  // for a given chat, so a freshly-launched chat (created "running" server-
-  // side on its first message) shows up right away instead of only once the
-  // whole tool sequence finishes (onFinish, below).
-  const historyRevalidatedForChatRef = useRef<string | null>(null);
 
   // Tracks the chat whose report was produced by a live stream in this
   // session. A launch captures a stale /api/messages snapshot mid-flight
@@ -228,8 +222,15 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     onData: (dataPart) => {
       setDataStream((ds) => (ds ? [...ds, dataPart] : []));
       streamedLiveForChatRef.current = chatId;
-      if (historyRevalidatedForChatRef.current !== chatId) {
-        historyRevalidatedForChatRef.current = chatId;
+      // Revalidate the sidebar history on every `data-chat-title` part. The
+      // BFF emits one early (a freshly launched chat shows up running as soon
+      // as the backend persists it at dispatch) and — for the non-stream
+      // path — one again when the run completes and the friendly title is
+      // PATCHed. That second revalidation is what stops the sidebar spinner
+      // and swaps in the friendly title once the row flips to "done".
+      // Revalidating on the first text-start part would be too early: that
+      // is written before the backend call is even made.
+      if (dataPart.type === "data-chat-title") {
         mutate(unstable_serialize(getChatHistoryPaginationKey));
       }
     },

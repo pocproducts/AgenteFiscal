@@ -10,6 +10,7 @@ import { BackendError, callBackend } from "@/lib/backend/client";
 export interface BackendConversationSummary {
   id: string;
   title: string;
+  status: string;
   messageCount: number;
   updatedAt: string | null;
   preview: string;
