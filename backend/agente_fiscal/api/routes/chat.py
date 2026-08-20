@@ -993,11 +993,42 @@ _PIPELINE_FLAG_ORDER: tuple[str, ...] = ('deuda', 'facilidades', 'registro', 'ii
 #: Orden de los motores deterministas en la respuesta consolidada.
 _DETERMINISTIC_ORDER: tuple[str, ...] = ('consultaarca', 'calendariovencimientosarca')
 
+#: Tools de browser que corren como UNA corrida consolidada de pipeline.
+#: Toque ordenado: la primera key de esta tupla presente en la selección
+#: etiqueta la única fila de telemetría del pipeline (AST-2).
+_PIPELINE_TOOL_KEYS: tuple[str, ...] = (
+	'informefiscal',
+	'deudavencimientos',
+	'misfacilidades',
+	'sistemaregistral',
+	'rentascordoba',
+	'enviarmail',
+)
+
+
+def _primary_pipeline_tool_key(tools: list[str]) -> str:
+	"""Tool key primaria para la fila consolidada del pipeline de browser.
+
+	Fila única por corrida consolidada (AST-2): se etiqueta con la primera
+	tool de browser de la selección; si la selección no trae browser keys se
+	usa ``informefiscal`` como fallback honesto (sin inventar una tool).
+	"""
+	for key in tools or []:
+		if key in _PIPELINE_TOOL_KEYS:
+			return key
+	return 'informefiscal'
+
 
 def _handle_selected_tools_pipeline(
 	cuit: str,
 	tools: list[str],
 	echo_func: Callable[[str], None],
+	*,
+	fastapi_request: Request | None = None,
+	conversation_id: str = '',
+	message_id: str | None = None,
+	profile_id: UUID | None = None,
+	tenant_id: UUID | None = None,
 ) -> dict[str, Any]:
 	"""Ejecuta una selección arbitraria de tools como UN solo pipeline consolidado.
 
@@ -1011,8 +1042,17 @@ def _handle_selected_tools_pipeline(
 	Best-effort por tool: ninguna falla propaga excepción — los errores se
 	colectan en el reply y ``actions_taken`` solo marca las tools completadas.
 
+	El pipeline es síncrono (corre en ``asyncio.to_thread``), así que NO
+	persiste nada: colecta registros livianos de telemetría (AST-2/3) en
+	``sessions`` y cada caller async los persiste tras el retorno con
+	``_persist_agent_session`` (nunca ``asyncio.run`` dentro del loop). Los
+	kwargs de contexto (``conversation_id``/``message_id``/``profile_id``/
+	``tenant_id``) se estampan en cada registro; son opcionales para no romper
+	callers existentes y tests.
+
 	Returns:
-		Dict compatible con ``ChatResponse``: ``{reply, data, actions_taken}``.
+		Dict compatible con ``ChatResponse``:
+		``{reply, data, actions_taken, sessions}``.
 	"""
 	tasks, deterministic, send_email = _resolve_tool_flags(tools)
 
@@ -1020,6 +1060,9 @@ def _handle_selected_tools_pipeline(
 	actions_taken: list[str] = []
 	notes: list[str] = []
 	errors: list[str] = []
+	#: Telemetría agent_sessions (AST-2/3): una fila por run real ejecutado.
+	#: Registros livianos; el persist async lo hace el caller (ADR-3).
+	sessions: list[dict[str, Any]] = []
 	#: Pedido de dirección de email (marker) — se anexa SIEMPRE al final del reply.
 	email_prompt: str | None = None
 
@@ -1029,8 +1072,11 @@ def _handle_selected_tools_pipeline(
 	uses_pipeline = tasks is not None and (
 		tasks.deuda or tasks.facilidades or tasks.registro or tasks.iibb or send_email
 	)
+	_primary_key = _primary_pipeline_tool_key(tools)
 	if uses_pipeline:
+		_pipeline_started = datetime.now(timezone.utc)
 		pipeline = _handle_wizard_pipeline(cuit, tasks, echo_func, send_email=send_email)
+		_pipeline_completed = datetime.now(timezone.utc)
 		if pipeline is None:
 			errors.append('No se pudo ejecutar el pipeline consolidado (credenciales ARCA no disponibles).')
 		else:
@@ -1056,13 +1102,49 @@ def _handle_selected_tools_pipeline(
 					)
 				else:
 					notes.append('⚠️ Email no enviado (sin dirección configurada o error en la extracción)')
+		# AST-2: UNA fila por corrida consolidada de browser. Status derivado
+		# del resultado (None o ``error`` → 'error'); ``tasks`` sigue la regla
+		# de la tool primaria (7 labels solo para consultaarca).
+		_pipeline_status = 'error' if (pipeline is None or pipeline.get('error')) else 'completed'
+		sessions.append(
+			{
+				'tool': _primary_key,
+				'status': _pipeline_status,
+				'message_id': message_id,
+				'conversation_id': conversation_id,
+				'profile_id': profile_id,
+				'tenant_id': tenant_id,
+				'tasks': build_session_tasks(_primary_key, _pipeline_status),
+				'started_at': _pipeline_started,
+				'completed_at': _pipeline_completed,
+			}
+		)
 
 	# ── Motores deterministas (best-effort individual) ───────────────────
 	for key in _DETERMINISTIC_ORDER:
 		if key not in deterministic:
 			continue
 		spec = TOOL_SPECS[key]
+		_run_started = datetime.now(timezone.utc)
 		resultado = _run_engine_tool(spec, cuit, echo_func)
+		_run_completed = datetime.now(timezone.utc)
+		_tool_key = spec.tool_key or spec.tool_name
+		# AST-2: una fila por engine determinista realmente ejecutado; status
+		# desde el dict (error key), duración = round-trip (ADR-3).
+		_run_status = 'error' if (resultado and resultado.get('error')) else 'completed'
+		sessions.append(
+			{
+				'tool': _tool_key,
+				'status': _run_status,
+				'message_id': message_id,
+				'conversation_id': conversation_id,
+				'profile_id': profile_id,
+				'tenant_id': tenant_id,
+				'tasks': build_session_tasks(_tool_key, _run_status),
+				'started_at': _run_started,
+				'completed_at': _run_completed,
+			}
+		)
 		if resultado and not resultado.get('error'):
 			data[key] = resultado
 			actions_taken.append(key)
@@ -1087,7 +1169,7 @@ def _handle_selected_tools_pipeline(
 		lines.append('\n')
 		lines.append(email_prompt)
 
-	return {'reply': '\n'.join(lines), 'data': data or None, 'actions_taken': actions_taken}
+	return {'reply': '\n'.join(lines), 'data': data or None, 'actions_taken': actions_taken, 'sessions': sessions}
 
 
 async def _append_and_persist(
@@ -1150,7 +1232,16 @@ async def _handle_multi_tool_message(
 		cuit,
 		request.tools,
 		lambda _msg: None,  # sin superficie de progreso en el flujo no-stream
+		conversation_id=conversation_id,
+		message_id=request.message_id,
+		profile_id=request.profile_id,
+		tenant_id=UUID(str(tenant_id)) if tenant_id else None,
 	)
+	# Telemetría agent_sessions (AST-2/3, ADR-3): persist POST-run best-effort —
+	# nunca corre dentro del thread (asyncio.run no es seguro allí); cada registro
+	# ya trae todo su contexto (tool/status/tasks/ids/duraciones).
+	for _row in result.get('sessions', []):
+		await _persist_agent_session(fastapi_request, **_row)
 	reply = result['reply']
 	await _append_and_persist(
 		fastapi_request,
@@ -1209,8 +1300,17 @@ async def _chat_multi_tool_stream(
 				cuit,
 				request.tools,
 				_progress,
+				conversation_id=conversation_id,
+				message_id=request.message_id,
+				profile_id=request.profile_id,
+				tenant_id=UUID(str(tenant_id)) if tenant_id else None,
 			)
 			reply = result['reply']
+			# Telemetría agent_sessions (AST-2/3, ADR-3): persist POST-run desde
+			# el loop async (nunca dentro del thread); _persist_agent_session
+			# traga sus propios fallos → el SSE no se rompe.
+			for _row in result.get('sessions', []):
+				await _persist_agent_session(fastapi_request, **_row)
 			await _append_and_persist(
 				fastapi_request,
 				conversation_id,
@@ -1306,6 +1406,7 @@ async def chat_wizard(
 	cuit = request.cuit
 	tasks = request.tasks
 	conversation_id = request.conversation_id or str(uuid.uuid4())
+	_tenant_id = getattr(fastapi_request.state, 'tenant_id', None)
 
 	# ── Helper: validar CUIT ───────────────────────────────────────────
 	def _cuit_valido(raw: str) -> bool:
@@ -1410,7 +1511,25 @@ async def chat_wizard(
 					},
 				)
 			)
+			# AST-2/3: UNA fila de telemetría para la corrida consolidada del
+			# wizard. Fecha de dispatch/retorno alrededor del pipeline (ADR-3);
+			# status derivado del resultado (None o ``error`` → 'error').
+			_wiz_started = datetime.now(timezone.utc)
 			data = await asyncio.to_thread(_handle_wizard_pipeline, cuit, tasks, _progress, request.send_email)
+			_wiz_completed = datetime.now(timezone.utc)
+			_wiz_status = 'error' if (data is None or data.get('error')) else 'completed'
+			await _persist_agent_session(
+				fastapi_request,
+				tool='informefiscal',
+				message_id=None,
+				conversation_id=conversation_id,
+				tenant_id=UUID(str(_tenant_id)) if _tenant_id else None,
+				profile_id=request.profile_id,
+				status=_wiz_status,
+				tasks=build_session_tasks('informefiscal', _wiz_status),
+				started_at=_wiz_started,
+				completed_at=_wiz_completed,
+			)
 			from agente_fiscal.domain.response_builder import format_reporte_response
 
 			if data is None:

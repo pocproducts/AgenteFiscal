@@ -263,7 +263,12 @@ async def test_composio_telemetry_resolve_run_combines_both(monkeypatch) -> None
 # ── AST-2 integration: chat.py persists one row post-run (Request fake) ─────
 
 
-def _fake_request(app: FastAPI, *, clerk_user_id: str | None = 'user_1') -> Request:
+def _fake_request(
+    app: FastAPI,
+    *,
+    clerk_user_id: str | None = 'user_1',
+    tenant_id: object | None = None,
+) -> Request:
     scope: dict = {
         'type': 'http',
         'method': 'POST',
@@ -279,6 +284,8 @@ def _fake_request(app: FastAPI, *, clerk_user_id: str | None = 'user_1') -> Requ
     request = Request(scope)
     if clerk_user_id:
         request.state.clerk_user_id = clerk_user_id
+    if tenant_id is not None:
+        request.state.tenant_id = tenant_id
     return request
 
 
@@ -358,6 +365,140 @@ async def test_chat_persist_skips_without_factory_or_tenant(
     async with test_session_factory() as session:
         count = (await session.execute(select(func.count()).select_from(AgentSessionRow))).scalar_one()
     assert count == 0
+
+
+# ── Multi-tool pipeline (chat.py): one row per deterministic engine run ─────
+
+
+class _FakePadronResult:
+    """Mock de PadronA5Result (``arca_ws.consultar_cuit``) para el engine."""
+
+    def __init__(self, data: dict, output=None):
+        self._data = data
+        self._output = output
+
+    def to_dict(self) -> dict:
+        return dict(self._data)
+
+    def to_output(self):
+        return self._output
+
+
+def _engine_env(monkeypatch) -> None:
+    """Ambiente de engines: token + padrón OK (consultaarca) en el pipeline."""
+    from types import SimpleNamespace
+
+    from agente_fiscal.adapters.arca_ws import consultar_cuit  # noqa: F401 (target del patch)
+
+    monkeypatch.setattr('agente_fiscal.api.deps.get_ta', lambda *a, **k: ('token', 'sign'))
+    monkeypatch.setattr('agente_fiscal.api.deps.REPRESENTANTE_CUIT', '20999999999')
+    padron = _FakePadronResult(
+        {
+            'denominacion': 'ACME SA',
+            'tipo': 'responsable_inscripto',
+            'estado_clave': 'ACTIVO',
+            'obligaciones': None,
+        },
+        output=SimpleNamespace(errorConstancia=None),
+    )
+    monkeypatch.setattr('agente_fiscal.adapters.arca_ws.consultar_cuit', lambda *a, **k: padron)
+
+
+async def test_multi_tool_message_persists_consultaarca_session(
+    test_session_factory, make_tenant, make_user, monkeypatch
+) -> None:
+    """``POST /v1/chat/message`` con ``tools=['consultaarca']`` persiste la fila
+    de telemetría del engine determinista (AST-2/3): tool, status completed,
+    7 Acciones canónicas, tenant + ids de la request."""
+    from agente_fiscal.api.routes.chat import ChatRequest, _handle_multi_tool_message
+
+    _engine_env(monkeypatch)
+
+    async with test_session_factory() as session:
+        tenant = await make_tenant(session)
+        user = await make_user(session, clerk_user_id='user_1')
+    app = FastAPI()
+    app.state.session_factory = test_session_factory
+    request = _fake_request(app, tenant_id=tenant.id)
+
+    response = await _handle_multi_tool_message(
+        ChatRequest(
+            message='consulta CUIT',
+            tools=['consultaarca'],
+            conversation_id='conv-mt-1',
+            message_id='msg-mt-1',
+        ),
+        request,
+        '20301234561',
+        'conv-mt-1',
+        tenant.id,
+        None,  # sin Redis store en el test
+        'consulta CUIT',
+    )
+    assert response.actions_taken == ['consultaarca']
+
+    async with test_session_factory() as session:
+        rows = (await session.execute(select(AgentSessionRow))).scalars().all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.tool == 'consultaarca'
+    assert row.status == 'completed'
+    assert row.tenant_id == tenant.id
+    assert row.user_id == user.id
+    assert row.message_id == 'msg-mt-1'
+    assert row.conversation_id == 'conv-mt-1'
+    assert row.profile_id is None
+    assert len(row.tasks) == 7
+    assert [t['label'] for t in row.tasks] == list(CONSULTAARCA_TASKS)
+    assert all(t['status'] == 'completed' for t in row.tasks)
+    assert row.started_at is not None and row.completed_at is not None
+    assert row.completed_at >= row.started_at
+
+
+async def test_multi_tool_message_error_run_marks_row_error(
+    test_session_factory, make_tenant, monkeypatch
+) -> None:
+    """Credenciales ARCA no disponibles (``get_ta`` → None) → la fila persiste
+    con ``status='error'`` y las 7 Acciones marcadas error (AST-2/3, best-effort:
+    el handler devuelve respuesta normal, no rompe)."""
+    from agente_fiscal.api.routes.chat import ChatRequest, _handle_multi_tool_message
+
+    monkeypatch.setattr('agente_fiscal.api.deps.get_ta', lambda *a, **k: (None, None))
+    monkeypatch.setattr('agente_fiscal.api.deps.REPRESENTANTE_CUIT', '20999999999')
+    monkeypatch.setattr('agente_fiscal.adapters.arca_ws.get_ta_error', lambda: 'certificados ausentes')
+
+    async with test_session_factory() as session:
+        tenant = await make_tenant(session)
+    app = FastAPI()
+    app.state.session_factory = test_session_factory
+    request = _fake_request(app, tenant_id=tenant.id)
+
+    response = await _handle_multi_tool_message(
+        ChatRequest(
+            message='consulta CUIT',
+            tools=['consultaarca'],
+            conversation_id='conv-mt-err',
+            message_id='msg-mt-err',
+        ),
+        request,
+        '20301234561',
+        'conv-mt-err',
+        tenant.id,
+        None,
+        'consulta CUIT',
+    )
+    assert 'consultaarca' not in response.actions_taken
+    assert 'error' in response.reply.lower() or 'no se pudo' in response.reply.lower()
+
+    async with test_session_factory() as session:
+        rows = (await session.execute(select(AgentSessionRow))).scalars().all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.tool == 'consultaarca'
+    assert row.status == 'error'
+    assert row.tenant_id == tenant.id
+    assert len(row.tasks) == 7
+    assert all(t['status'] == 'error' for t in row.tasks)
 
 
 class _FakeResponse:
