@@ -7,6 +7,7 @@ import { AppSidebar } from "@/components/chat/app-sidebar";
 import { ChatLayoutWrapper } from "@/components/chat/chat-layout-wrapper";
 import { DataStreamProvider } from "@/components/chat/data-stream-provider";
 import { PanelTopbar } from "@/components/chat/panel-topbar";
+import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import type { PanelUser } from "@/lib/shared/db-types";
 
@@ -18,9 +19,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         strategy="lazyOnload"
       />
       <DataStreamProvider>
-        <Suspense fallback={<div className="flex h-dvh bg-sidebar" />}>
-          <SidebarShell>{children}</SidebarShell>
-        </Suspense>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          disableTransitionOnChange
+          enableSystem
+        >
+          <Suspense fallback={<div className="flex h-dvh bg-sidebar" />}>
+            <SidebarShell>{children}</SidebarShell>
+          </Suspense>
+        </ThemeProvider>
       </DataStreamProvider>
     </>
   );
