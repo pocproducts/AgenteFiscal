@@ -11,6 +11,13 @@ Every function receives an ``AsyncSession`` — callers own the session lifecycl
 ``owner``/``admin`` see and delete every conversation of the tenant, ``member``
 only their own.
 
+Deletion is a tombstone (ADR-5): ``delete_*`` sets ``conversations.deleted_at``
+instead of removing rows, and every read/upsert filters ``deleted_at IS NULL`` —
+a deleted conversation can never reappear or be resurrected by title saves or
+stream upserts (CD-1/2). ``upsert_conversation`` returns ``None`` when the
+target row is tombstoned so the stream can surface the missing-conversation
+result; ``patch_conversation_title`` never creates.
+
 Also hosts ``insert_generated_pdf``: writes the raw PDF bytes (``content_bytes``)
 into ``generated_pdfs`` so a report can be re-served even if the filesystem path
 disappeared.
@@ -20,9 +27,10 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Sequence
 
-from sqlalchemy import delete, select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agente_fiscal.db.models import Conversation, GeneratedPdf, Message
@@ -55,6 +63,16 @@ def default_title(messages: Sequence[dict[str, Any]] | None) -> str | None:
 	return None
 
 
+def _not_deleted() -> Any:
+	"""Predicado SQL: conversación NO tombstoneada (deleted_at IS NULL).
+
+	Todas las lecturas (list/get/status/patch) y la escritura (upsert) filtran
+	por esto: un chat borrado (ADR-5) deja de existir para el cliente — solo el
+	tombstone garantiza que el upsert no lo resucite (CD-1).
+	"""
+	return Conversation.deleted_at.is_(None)
+
+
 async def upsert_conversation(
 	session: AsyncSession,
 	tenant_id: uuid.UUID,
@@ -65,14 +83,18 @@ async def upsert_conversation(
 	messages: Sequence[dict[str, Any]],
 	*,
 	status: str | None = None,
-) -> uuid.UUID:
+) -> uuid.UUID | None:
 	"""Crea la conversación si no existe y appenda los mensajes nuevos.
 
 	Idempotente por (role, content): los mensajes ya presentes en la
 	conversación no se duplican (el frontend re-envía el historial completo y
 	chat.py persiste por turno). ``status`` solo se aplica si se pasa
 	explícitamente; en upserts posteriores se conserva el estado vigente.
-	Commita la transacción antes de retornar.
+	Commits la transacción antes de retornar.
+
+	Retorna ``None`` cuando la conversación existe pero fue borrada (tombstone
+	``deleted_at``, ADR-5/CD-2): el turno debe surfear el resultado
+	missing-conversation en vez de re-crear el chat.
 	"""
 	conv_id = conv_uuid(conversation_id)
 	conv = await session.scalar(
@@ -81,6 +103,8 @@ async def upsert_conversation(
 			Conversation.tenant_id == tenant_id,
 		)
 	)
+	if conv is not None and conv.deleted_at is not None:
+		return None
 	if conv is None:
 		conv = Conversation(
 			id=conv_id,
@@ -151,9 +175,13 @@ async def list_conversations(
 		stmt = select(Conversation).where(
 			Conversation.tenant_id == tenant_id,
 			Conversation.user_id == user_id,
+			_not_deleted(),
 		)
 	else:
-		stmt = select(Conversation).where(Conversation.tenant_id == tenant_id)
+		stmt = select(Conversation).where(
+			Conversation.tenant_id == tenant_id,
+			_not_deleted(),
+		)
 	stmt = stmt.order_by(Conversation.updated_at.desc()).limit(limit)
 	convs = (await session.execute(stmt)).scalars().all()
 	if not convs:
@@ -172,6 +200,7 @@ async def list_conversations(
 		{
 			'id': str(c.id),
 			'title': c.title or 'Nueva conversación',
+			'status': c.status,
 			'messageCount': len(by_conv[c.id]),
 			'updatedAt': c.updated_at.isoformat() if c.updated_at else None,
 			'preview': _preview(by_conv[c.id]),
@@ -189,13 +218,15 @@ async def get_conversation(
 ) -> dict[str, Any] | None:
 	"""Conversación completa + mensajes ordenados por ``created_at``.
 
-	Retorna ``None`` si no existe o pertenece a otro tenant.
+	Retorna ``None`` si no existe, pertenece a otro tenant, o fue borrada
+	(tombstone ``deleted_at`` — CD-1: un chat eliminado no reaparece).
 	"""
 	conv_id = conv_uuid(conversation_id)
 	conv = await session.scalar(
 		select(Conversation).where(
 			Conversation.id == conv_id,
 			Conversation.tenant_id == tenant_id,
+			_not_deleted(),
 		)
 	)
 	if conv is None:
@@ -232,12 +263,17 @@ async def set_conversation_status(
 	conversation_id: str | uuid.UUID,
 	status: str,
 ) -> bool:
-	"""Marca el estado de una conversación (``running``/``done``)."""
+	"""Marca el estado de una conversación (``running``/``done``).
+
+	No toca conversaciones borradas (tombstone): un chat eliminado no se
+	reactiva vía status (CD-1).
+	"""
 	conv_id = conv_uuid(conversation_id)
 	conv = await session.scalar(
 		select(Conversation).where(
 			Conversation.id == conv_id,
 			Conversation.tenant_id == tenant_id,
+			_not_deleted(),
 		)
 	)
 	if conv is None:
@@ -254,11 +290,16 @@ async def delete_conversation(
 	user_id: uuid.UUID | None,
 	role: str,
 ) -> bool:
-	"""Hard delete con ownership: owner/admin borran cualquiera del tenant;
-	un member solo si la conversación es suya. Retorna si se borró algo."""
+	"""Tombstone delete con ownership (ADR-5/CD-1): marca ``deleted_at``.
+
+	owner/admin borran cualquiera del tenant; un member solo si la conversación
+	es suya. Retorna ``False`` (→ 404 honesto) cuando la conversación no existe,
+	pertenece a otro tenant o ya fue borrada: el segundo DELETE no reporta éxito.
+	"""
 	stmt = select(Conversation).where(
 		Conversation.id == conv_uuid(conversation_id),
 		Conversation.tenant_id == tenant_id,
+		_not_deleted(),
 	)
 	if role not in _ADMIN_ROLES:
 		if user_id is None:
@@ -267,7 +308,7 @@ async def delete_conversation(
 	conv = await session.scalar(stmt)
 	if conv is None:
 		return False
-	await session.delete(conv)
+	conv.deleted_at = datetime.now(timezone.utc)
 	await session.commit()
 	return True
 
@@ -278,9 +319,13 @@ async def delete_all(
 	user_id: uuid.UUID | None,
 	role: str,
 ) -> int:
-	"""Borra todas las conversaciones del tenant (owner/admin) o solo las
-	propias (member). Retorna el count de filas eliminadas."""
-	stmt = select(Conversation.id).where(Conversation.tenant_id == tenant_id)
+	"""Tombstonea todas las conversaciones del tenant (owner/admin) o solo las
+	propias (member). Retorna el count de filas marcadas (CD-1: las ya borradas
+	no se cuentan)."""
+	stmt = select(Conversation.id).where(
+		Conversation.tenant_id == tenant_id,
+		_not_deleted(),
+	)
 	if role not in _ADMIN_ROLES:
 		if user_id is None:
 			return 0
@@ -288,9 +333,40 @@ async def delete_all(
 	ids = (await session.execute(stmt)).scalars().all()
 	if not ids:
 		return 0
-	await session.execute(delete(Conversation).where(Conversation.id.in_(ids)))
+	await session.execute(
+		update(Conversation)
+		.where(Conversation.id.in_(ids))
+		.values(deleted_at=datetime.now(timezone.utc))
+	)
 	await session.commit()
 	return len(ids)
+
+
+async def patch_conversation_title(
+	session: AsyncSession,
+	tenant_id: uuid.UUID,
+	conversation_id: str | uuid.UUID,
+	title: str,
+) -> bool:
+	"""Actualiza SOLO el título de una conversación existente (CD-2).
+
+	Nunca crea una fila: retorna ``False`` (→ 404 honesto) cuando la
+	conversación no existe o fue borrada. Reemplaza el POST ``saveConversation``
+	de la BFF para los renames de título.
+	"""
+	conv_id = conv_uuid(conversation_id)
+	conv = await session.scalar(
+		select(Conversation).where(
+			Conversation.id == conv_id,
+			Conversation.tenant_id == tenant_id,
+			_not_deleted(),
+		)
+	)
+	if conv is None:
+		return False
+	conv.title = title
+	await session.commit()
+	return True
 
 
 async def insert_generated_pdf(
@@ -328,6 +404,7 @@ __all__ = [
 	'get_conversation',
 	'insert_generated_pdf',
 	'list_conversations',
+	'patch_conversation_title',
 	'set_conversation_status',
 	'upsert_conversation',
 ]

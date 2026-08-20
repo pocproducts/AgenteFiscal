@@ -1,6 +1,7 @@
 "use client";
 
 import { useClerk, useUser } from "@clerk/nextjs";
+import { useEffect, useState } from "react";
 import { ChevronUp } from "lucide-react";
 import { useTheme } from "next-themes";
 import {
@@ -34,6 +35,11 @@ export function SidebarUserNav({ user }: { user: PanelUser }) {
   const { signOut } = useClerk();
   const { setTheme, resolvedTheme } = useTheme();
   const menu = t.panel.sidebar.userMenu;
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const _email =
     clerkUser?.emailAddresses?.[0]?.emailAddress ?? user.email ?? "";
@@ -43,7 +49,7 @@ export function SidebarUserNav({ user }: { user: PanelUser }) {
       <SidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            {isLoaded ? (
+            {mounted && isLoaded ? (
               <SidebarMenuButton
                 className="h-8 px-2 rounded-lg bg-transparent text-sidebar-foreground/70 transition-colors duration-150 hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                 data-testid="user-nav-button"

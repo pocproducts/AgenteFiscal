@@ -63,6 +63,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -72,6 +73,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from uuid import UUID
 
+from agente_fiscal.adapters.db_agent_sessions import PostgresAgentSessionsRepository
 from agente_fiscal.api.profile_gate import ActiveProfileContext, validate_active_profile
 from agente_fiscal.api.store import RedisStore
 from agente_fiscal.db.conversation_repo import (
@@ -90,7 +92,9 @@ from agente_fiscal.domain.response_builder import (
 	format_reporte_response,
 	format_taxpayer_response,
 )
+from agente_fiscal.domain.session_tasks import build_session_tasks
 from agente_fiscal.domain.tool_spec import INTENT_TO_KEY, TOOL_SPECS, ToolSpec
+from agente_fiscal.ports.agent_sessions import AgentSession
 
 router = APIRouter()
 
@@ -157,6 +161,11 @@ class ChatRequest(BaseModel):
 	profile_id: UUID | None = Field(
 		default=None,
 		description='Active tenant profile required to generate a report (REPORTE_COMPLETO intent)',
+	)
+	message_id: str | None = Field(
+		default=None,
+		description='Opaque message identifier assigned by the frontend; '
+		'persisted on the agent_sessions row (AST-4), defaults to None for API/CLI callers',
 	)
 
 
@@ -301,7 +310,7 @@ async def _persist_conversation(
 				user_id = await session.scalar(
 					select(User.id).where(User.clerk_user_id == clerk_user_id).limit(1)
 				)
-			await upsert_conversation(
+			result = await upsert_conversation(
 				session,
 				tenant_id=tenant_uuid,
 				user_id=user_id,
@@ -311,8 +320,167 @@ async def _persist_conversation(
 				messages=messages,
 				status=status,
 			)
+		if result is None:
+			# CD-2: la conversación fue borrada (tombstone, ADR-5) — el upsert
+			# NO la resucita. El flujo lo trata como missing-conversation.
+			logger.info(
+				'Conversación %s borrada durante el stream — se saltea la persistencia del turno',
+				conversation_id,
+			)
+			return False
+		return True
 	except Exception as exc:
 		logger.warning('No se pudo persistir la conversación %s en Postgres: %s', conversation_id, exc)
+		return False
+
+
+async def _persist_agent_session_start(
+	fastapi_request: Request,
+	*,
+	tool: str,
+	message_id: str | None,
+	conversation_id: str,
+	tenant_id: uuid.UUID | None,
+	profile_id: UUID | None,
+	session_id: str | None = None,
+) -> str | None:
+	"""Inserta la fila ``agent_sessions`` en estado ``running`` (best-effort, AST-2/3).
+
+	Se llama en el dispatch, ANTES de que la tool ejecute: el row queda en la DB
+	en el momento exacto en que la UI muestra "Iniciando un chat…". El id
+	generado (uuid4) se usa luego en :func:`_persist_agent_session` para
+	COMPLETAR la misma fila (nunca se duplica). Mirrors ``_persist_agent_session``:
+	sin factory o sin tenant se saltea; los fallos de DB se loguean y el stream
+	SSE nunca se rompe (ADR-3).
+	"""
+	factory = getattr(fastapi_request.app.state, 'session_factory', None)
+	if factory is None or not tenant_id:
+		return None
+	try:
+		clerk_user_id = getattr(fastapi_request.state, 'clerk_user_id', None)
+		user_id: UUID | None = None
+		if clerk_user_id:
+			async with factory() as session:
+				user_id = await session.scalar(
+					select(User.id).where(User.clerk_user_id == clerk_user_id).limit(1)
+				)
+		repo = PostgresAgentSessionsRepository(factory)
+		sid = str(uuid.uuid4())
+		await repo.record(
+			AgentSession(
+				id=sid,
+				tool=tool,
+				message_id=message_id,
+				conversation_id=conversation_id,
+				profile_id=str(profile_id) if profile_id else None,
+				tenant_id=str(tenant_id),
+				user_id=str(user_id) if user_id else None,
+				session_id=session_id,
+				status='running',
+				tasks=[],
+				cost_cents=0,
+				started_at=datetime.now(timezone.utc),
+				completed_at=None,
+			)
+		)
+		return sid
+	except Exception as exc:
+		logger.warning(
+			'No se pudo registrar el inicio de la sesión de agente %s: %s', tool, exc
+		)
+		return None
+
+
+async def _persist_conversation_start(
+	fastapi_request: Request,
+	conversation_id: str,
+	message: str,
+	profile_id: UUID | None,
+) -> None:
+	"""Persiste la conversación en estado ``running`` al dispatch (AST-2/3, ADR-3).
+
+	Se llama ANTES de que la tool corra: la fila queda en Postgres en el
+	instante en que la UI dice "Iniciando un chat…" para que el sidebar la
+	muestre al toque. El upsert post-run (status 'done') completa la MISMA
+	fila (idempotente por role/content — nunca duplica el mensaje de usuario).
+	Best-effort: sin factory/tenant o fallo de DB se loguea y el stream nunca
+	se rompe.
+	"""
+	await _persist_conversation(
+		fastapi_request,
+		conversation_id,
+		[{'role': 'user', 'content': message}],
+		profile_id=profile_id,
+		status='running',
+	)
+
+
+async def _persist_agent_session(
+	fastapi_request: Request,
+	*,
+	tool: str,
+	agent_session_id: str | None = None,
+	message_id: str | None,
+	conversation_id: str,
+	tenant_id: uuid.UUID | None,
+	profile_id: UUID | None,
+	status: str,
+	tasks: list[dict[str, Any]],
+	cost_cents: int = 0,
+	session_id: str | None = None,
+	started_at: datetime | None = None,
+	completed_at: datetime | None = None,
+) -> None:
+	"""Persiste UNA fila de telemetría ``agent_sessions`` (best-effort, AST-2/3).
+
+	Mirrors ``_persist_conversation``: sin factory o sin tenant se saltea; los
+	fallos de DB se loguean y el stream SSE nunca se rompe (ADR-3). El row se
+	crea en el dispatch con status ``running`` (``_persist_agent_session_start``,
+	'Comenzó') y esta helper lo COMPLETA post-run vía ``repo.complete`` —
+	actualiza la MISMA fila (id), nunca toca tool/ids/started_at. Sin
+	``agent_session_id`` (fila nunca pre-iniciada) inserta una fila completa
+	post-run con ``record``, preservando el comportamiento previo.
+	"""
+	factory = getattr(fastapi_request.app.state, 'session_factory', None)
+	if factory is None or not tenant_id:
+		return
+	try:
+		repo = PostgresAgentSessionsRepository(factory)
+		if agent_session_id:
+			await repo.complete(
+				agent_session_id,
+				status=status,
+				tasks=tasks,
+				completed_at=completed_at,
+				cost_cents=cost_cents,
+			)
+			return
+		clerk_user_id = getattr(fastapi_request.state, 'clerk_user_id', None)
+		user_id: UUID | None = None
+		if clerk_user_id:
+			async with factory() as session:
+				user_id = await session.scalar(
+					select(User.id).where(User.clerk_user_id == clerk_user_id).limit(1)
+				)
+		await repo.record(
+			AgentSession(
+				id=str(uuid.uuid4()),
+				tool=tool,
+				message_id=message_id,
+				conversation_id=conversation_id,
+				profile_id=str(profile_id) if profile_id else None,
+				tenant_id=str(tenant_id),
+				user_id=str(user_id) if user_id else None,
+				session_id=session_id,
+				status=status,
+				tasks=tasks,
+				cost_cents=cost_cents,
+				started_at=started_at,
+				completed_at=completed_at,
+			)
+		)
+	except Exception as exc:
+		logger.warning('No se pudo persistir la sesión de agente %s: %s', tool, exc)
 
 
 async def _persist_chat_pdf(
@@ -490,14 +658,42 @@ def _run_browser_tool(
 			cliente_cuit=cuit,
 			**spec.task_flags,
 		)
+		_metrics_holder: dict[str, Any] = {}
+
+		def _real_metrics(metrics: dict) -> None:
+			# Propaga al caller (holder last-write + SSE) solo si algo se emitió;
+			# _metrics_holder local permite detectar providers sin telemetría.
+			_metrics_holder.update(metrics)
+			if on_task_metrics:
+				on_task_metrics(metrics)
+
 		out = browser.run_single(
 			ClientConfig(cuit=cuit),
 			tasks=tasks,
 			echo_func=echo_func,
 			on_live_url=on_live_url,
 			on_step=on_step,
-			on_task_metrics=on_task_metrics,
+			on_task_metrics=_real_metrics,
 		)
+		# ADR-7: Composio no emite métricas por callback (run_single lo ignora).
+		# Resuelve session_id + event_count vía telemetría API post-run —
+		# best-effort, nunca falla; mock queda con session_id NULL por diseño.
+		if not _metrics_holder and hasattr(browser, '_api_key'):
+			from agente_fiscal.adapters.browser.composio_telemetry import ComposioTelemetry
+
+			run = ComposioTelemetry(browser._api_key).resolve_run()
+			if run:
+				_run_metrics: dict[str, Any] = {}
+				if run.get('session_id'):
+					_run_metrics['session_id'] = run['session_id']
+				if run.get('event_count'):
+					_run_metrics['tasks'] = build_session_tasks(
+						spec.tool_key or spec.tool_name,
+						'completed',
+						count=int(run['event_count']),
+					)
+				if _run_metrics and on_task_metrics:
+					on_task_metrics(_run_metrics)
 	except Exception as exc:
 		return {'error': 'BROWSER_ERROR', 'detail': str(exc)}
 
@@ -891,11 +1087,43 @@ _PIPELINE_FLAG_ORDER: tuple[str, ...] = ('deuda', 'facilidades', 'registro', 'ii
 #: Orden de los motores deterministas en la respuesta consolidada.
 _DETERMINISTIC_ORDER: tuple[str, ...] = ('consultaarca', 'calendariovencimientosarca')
 
+#: Tools de browser que corren como UNA corrida consolidada de pipeline.
+#: Toque ordenado: la primera key de esta tupla presente en la selección
+#: etiqueta la única fila de telemetría del pipeline (AST-2).
+_PIPELINE_TOOL_KEYS: tuple[str, ...] = (
+	'informefiscal',
+	'deudavencimientos',
+	'misfacilidades',
+	'sistemaregistral',
+	'rentascordoba',
+	'enviarmail',
+)
+
+
+def _primary_pipeline_tool_key(tools: list[str]) -> str:
+	"""Tool key primaria para la fila consolidada del pipeline de browser.
+
+	Fila única por corrida consolidada (AST-2): se etiqueta con la primera
+	tool de browser de la selección; si la selección no trae browser keys se
+	usa ``informefiscal`` como fallback honesto (sin inventar una tool).
+	"""
+	for key in tools or []:
+		if key in _PIPELINE_TOOL_KEYS:
+			return key
+	return 'informefiscal'
+
 
 def _handle_selected_tools_pipeline(
 	cuit: str,
 	tools: list[str],
 	echo_func: Callable[[str], None],
+	*,
+	fastapi_request: Request | None = None,
+	conversation_id: str = '',
+	message_id: str | None = None,
+	profile_id: UUID | None = None,
+	tenant_id: UUID | None = None,
+	prestarted_ids: dict[str, str] | None = None,
 ) -> dict[str, Any]:
 	"""Ejecuta una selección arbitraria de tools como UN solo pipeline consolidado.
 
@@ -909,8 +1137,23 @@ def _handle_selected_tools_pipeline(
 	Best-effort por tool: ninguna falla propaga excepción — los errores se
 	colectan en el reply y ``actions_taken`` solo marca las tools completadas.
 
+	El pipeline es síncrono (corre en ``asyncio.to_thread``), así que NO
+	persiste nada: colecta registros livianos de telemetría (AST-2/3) en
+	``sessions`` y cada caller async los persiste tras el retorno con
+	``_persist_agent_session`` (nunca ``asyncio.run`` dentro del loop). Los
+	kwargs de contexto (``conversation_id``/``message_id``/``profile_id``/
+	``tenant_id``) se estampan en cada registro; son opcionales para no romper
+	callers existentes y tests.
+
+	``prestarted_ids`` (tool_key → id de fila ``running`` ya insertada por el
+	caller antes de ``to_thread``) se estampa en cada registro como
+	``agent_session_id``: el persist post-run completa la MISMA fila en vez de
+	crear una nueva. Una key sin id prestarteado queda sin ``agent_session_id``
+	y el caller vuelve al flujo anterior (INSERT completo post-run).
+
 	Returns:
-		Dict compatible con ``ChatResponse``: ``{reply, data, actions_taken}``.
+		Dict compatible con ``ChatResponse``:
+		``{reply, data, actions_taken, sessions}``.
 	"""
 	tasks, deterministic, send_email = _resolve_tool_flags(tools)
 
@@ -918,6 +1161,9 @@ def _handle_selected_tools_pipeline(
 	actions_taken: list[str] = []
 	notes: list[str] = []
 	errors: list[str] = []
+	#: Telemetría agent_sessions (AST-2/3): una fila por run real ejecutado.
+	#: Registros livianos; el persist async lo hace el caller (ADR-3).
+	sessions: list[dict[str, Any]] = []
 	#: Pedido de dirección de email (marker) — se anexa SIEMPRE al final del reply.
 	email_prompt: str | None = None
 
@@ -927,8 +1173,11 @@ def _handle_selected_tools_pipeline(
 	uses_pipeline = tasks is not None and (
 		tasks.deuda or tasks.facilidades or tasks.registro or tasks.iibb or send_email
 	)
+	_primary_key = _primary_pipeline_tool_key(tools)
 	if uses_pipeline:
+		_pipeline_started = datetime.now(timezone.utc)
 		pipeline = _handle_wizard_pipeline(cuit, tasks, echo_func, send_email=send_email)
+		_pipeline_completed = datetime.now(timezone.utc)
 		if pipeline is None:
 			errors.append('No se pudo ejecutar el pipeline consolidado (credenciales ARCA no disponibles).')
 		else:
@@ -954,13 +1203,51 @@ def _handle_selected_tools_pipeline(
 					)
 				else:
 					notes.append('⚠️ Email no enviado (sin dirección configurada o error en la extracción)')
+		# AST-2: UNA fila por corrida consolidada de browser. Status derivado
+		# del resultado (None o ``error`` → 'error'); ``tasks`` sigue la regla
+		# de la tool primaria (7 labels solo para consultaarca).
+		_pipeline_status = 'error' if (pipeline is None or pipeline.get('error')) else 'completed'
+		sessions.append(
+			{
+				'tool': _primary_key,
+				'status': _pipeline_status,
+				'message_id': message_id,
+				'conversation_id': conversation_id,
+				'profile_id': profile_id,
+				'tenant_id': tenant_id,
+				'tasks': build_session_tasks(_primary_key, _pipeline_status),
+				'started_at': _pipeline_started,
+				'completed_at': _pipeline_completed,
+				'agent_session_id': (prestarted_ids or {}).get(_primary_key),
+			}
+		)
 
 	# ── Motores deterministas (best-effort individual) ───────────────────
 	for key in _DETERMINISTIC_ORDER:
 		if key not in deterministic:
 			continue
 		spec = TOOL_SPECS[key]
+		_run_started = datetime.now(timezone.utc)
 		resultado = _run_engine_tool(spec, cuit, echo_func)
+		_run_completed = datetime.now(timezone.utc)
+		_tool_key = spec.tool_key or spec.tool_name
+		# AST-2: una fila por engine determinista realmente ejecutado; status
+		# desde el dict (error key), duración = round-trip (ADR-3).
+		_run_status = 'error' if (resultado and resultado.get('error')) else 'completed'
+		sessions.append(
+			{
+				'tool': _tool_key,
+				'status': _run_status,
+				'message_id': message_id,
+				'conversation_id': conversation_id,
+				'profile_id': profile_id,
+				'tenant_id': tenant_id,
+				'tasks': build_session_tasks(_tool_key, _run_status),
+				'started_at': _run_started,
+				'completed_at': _run_completed,
+				'agent_session_id': (prestarted_ids or {}).get(_tool_key),
+			}
+		)
 		if resultado and not resultado.get('error'):
 			data[key] = resultado
 			actions_taken.append(key)
@@ -985,7 +1272,7 @@ def _handle_selected_tools_pipeline(
 		lines.append('\n')
 		lines.append(email_prompt)
 
-	return {'reply': '\n'.join(lines), 'data': data or None, 'actions_taken': actions_taken}
+	return {'reply': '\n'.join(lines), 'data': data or None, 'actions_taken': actions_taken, 'sessions': sessions}
 
 
 async def _append_and_persist(
@@ -1020,6 +1307,49 @@ async def _append_and_persist(
 	)
 
 
+async def _prestart_agent_sessions(
+	fastapi_request: Request,
+	*,
+	tools: list[str],
+	message_id: str | None,
+	conversation_id: str,
+	tenant_id: uuid.UUID | None,
+	profile_id: UUID | None,
+) -> dict[str, str]:
+	"""Pre-inicia (status ``running``) las filas agent_sessions que el pipeline creará.
+
+	Corre en el caller async ANTES de ``asyncio.to_thread``: para cada tool que
+	realmente produce una fila de telemetría se inserta el row YA (AST-2/3) —
+	"Iniciando un chat…" en la UI se emite en el mismo dispatch. Pre-inicia SOLO
+	las keys que generan row (tool primaria del pipeline + engines deterministas:
+	una selección con varias browser tools crea UNA sola fila consolidada; el
+	resto de las keys no crea row y no se pre-inicia para no dejar filas
+	huérfanas en estado ``running``). Best-effort (ADR-3): sin factory/tenant o
+	fallo de DB → esa key no se prestarta y el persist post-run vuelve al flujo
+	anterior (INSERT completo).
+	"""
+	_tasks, _deterministic, _send_email = _resolve_tool_flags(tools or [])
+	_keys: list[str] = []
+	if _tasks is not None and (
+		_tasks.deuda or _tasks.facilidades or _tasks.registro or _tasks.iibb or _send_email
+	):
+		_keys.append(_primary_pipeline_tool_key(tools or []))
+	_keys.extend(k for k in _DETERMINISTIC_ORDER if k in _deterministic)
+	prestarted_ids: dict[str, str] = {}
+	for _tool in _keys:
+		_sid = await _persist_agent_session_start(
+			fastapi_request,
+			tool=_tool,
+			message_id=message_id,
+			conversation_id=conversation_id,
+			tenant_id=tenant_id,
+			profile_id=profile_id,
+		)
+		if _sid:
+			prestarted_ids[_tool] = _sid
+	return prestarted_ids
+
+
 async def _handle_multi_tool_message(
 	request: ChatRequest,
 	fastapi_request: Request,
@@ -1043,12 +1373,35 @@ async def _handle_multi_tool_message(
 		)
 		return ChatResponse(conversation_id=conversation_id, reply=reply, actions_taken=[])
 
+	# Telemetría agent_sessions (AST-2/3, ADR-3): pre-inicia las filas running
+	# ANTES del run (el row ya está en la DB cuando la UI dice "Iniciando…") y
+	# persiste el complete post-run best-effort — nunca corre dentro del thread
+	# (asyncio.run no es seguro allí). ``prestarted_ids`` estampa el id en cada
+	# registro (la pipeline lo anexa) para completar la MISMA fila.
+	prestarted_ids = await _prestart_agent_sessions(
+		fastapi_request,
+		tools=request.tools,
+		message_id=request.message_id,
+		conversation_id=conversation_id,
+		tenant_id=UUID(str(tenant_id)) if tenant_id else None,
+		profile_id=request.profile_id,
+	)
 	result = await asyncio.to_thread(
 		_handle_selected_tools_pipeline,
 		cuit,
 		request.tools,
 		lambda _msg: None,  # sin superficie de progreso en el flujo no-stream
+		conversation_id=conversation_id,
+		message_id=request.message_id,
+		profile_id=request.profile_id,
+		tenant_id=UUID(str(tenant_id)) if tenant_id else None,
+		prestarted_ids=prestarted_ids,
 	)
+	# Telemetría agent_sessions (AST-2/3, ADR-3): persist POST-run best-effort —
+	# completa la fila pre-initada (agent_session_id) o inserta completa si no
+	# había (fallback); cada registro ya trae todo su contexto.
+	for _row in result.get('sessions', []):
+		await _persist_agent_session(fastapi_request, **_row)
 	reply = result['reply']
 	await _append_and_persist(
 		fastapi_request,
@@ -1092,6 +1445,13 @@ async def _chat_multi_tool_stream(
 		)
 		return StreamingResponse(_iter_sse_early(conversation_id, reply), media_type='text/event-stream', headers=headers)
 
+	# La fila de la conversación queda en Postgres ANTES de que el pipeline
+	# corra (status 'running') para que el sidebar la muestre al instante;
+	# el upsert post-run (status 'done') completa la MISMA fila.
+	await _persist_conversation_start(
+		fastapi_request, conversation_id, message, request.profile_id
+	)
+
 	queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 	_loop = asyncio.get_running_loop()
 	_progress_messages: list[str] = []
@@ -1102,13 +1462,35 @@ async def _chat_multi_tool_stream(
 
 	async def _run():
 		try:
+			# Telemetría agent_sessions (AST-2/3, ADR-3): pre-inicia las filas
+			# running ANTES de correr el pipeline (el row ya está en la DB cuando
+			# la UI dice "Iniciando…"); cada registro estampa su id (la pipeline
+			# lo anexa via ``prestarted_ids``) para completar la MISMA fila.
+			prestarted_ids = await _prestart_agent_sessions(
+				fastapi_request,
+				tools=request.tools,
+				message_id=request.message_id,
+				conversation_id=conversation_id,
+				tenant_id=UUID(str(tenant_id)) if tenant_id else None,
+				profile_id=request.profile_id,
+			)
 			result = await asyncio.to_thread(
 				_handle_selected_tools_pipeline,
 				cuit,
 				request.tools,
 				_progress,
+				conversation_id=conversation_id,
+				message_id=request.message_id,
+				profile_id=request.profile_id,
+				tenant_id=UUID(str(tenant_id)) if tenant_id else None,
+				prestarted_ids=prestarted_ids,
 			)
 			reply = result['reply']
+			# Telemetría agent_sessions (AST-2/3, ADR-3): persist POST-run desde
+			# el loop async (nunca dentro del thread); _persist_agent_session
+			# traga sus propios fallos → el SSE no se rompe.
+			for _row in result.get('sessions', []):
+				await _persist_agent_session(fastapi_request, **_row)
 			await _append_and_persist(
 				fastapi_request,
 				conversation_id,
@@ -1204,6 +1586,7 @@ async def chat_wizard(
 	cuit = request.cuit
 	tasks = request.tasks
 	conversation_id = request.conversation_id or str(uuid.uuid4())
+	_tenant_id = getattr(fastapi_request.state, 'tenant_id', None)
 
 	# ── Helper: validar CUIT ───────────────────────────────────────────
 	def _cuit_valido(raw: str) -> bool:
@@ -1308,7 +1691,46 @@ async def chat_wizard(
 					},
 				)
 			)
+			# AST-2/3: UNA fila de telemetría para la corrida consolidada del
+			# wizard. Fecha de dispatch/retorno alrededor del pipeline (ADR-3);
+			# status derivado del resultado (None o ``error`` → 'error'). El row
+			# se pre-inicia con status 'running' ANTES del run (la UI muestra
+			# "Iniciando un chat…" en ese mismo dispatch) y se completa post-run.
+			_wiz_sid = await _persist_agent_session_start(
+				fastapi_request,
+				tool='informefiscal',
+				message_id=None,
+				conversation_id=conversation_id,
+				tenant_id=UUID(str(_tenant_id)) if _tenant_id else None,
+				profile_id=request.profile_id,
+			)
+			# La fila de la conversación queda en Postgres ANTES de que el
+			# pipeline corra (status 'running') para que el sidebar la muestre
+			# al instante; el upsert post-run (status 'done') completa la MISMA
+			# fila (idempotente por role/content — nunca duplica el mensaje).
+			await _persist_conversation_start(
+				fastapi_request,
+				conversation_id,
+				f'Generar reporte fiscal para CUIT {cuit}',
+				request.profile_id,
+			)
+			_wiz_started = datetime.now(timezone.utc)
 			data = await asyncio.to_thread(_handle_wizard_pipeline, cuit, tasks, _progress, request.send_email)
+			_wiz_completed = datetime.now(timezone.utc)
+			_wiz_status = 'error' if (data is None or data.get('error')) else 'completed'
+			await _persist_agent_session(
+				fastapi_request,
+				tool='informefiscal',
+				agent_session_id=_wiz_sid,
+				message_id=None,
+				conversation_id=conversation_id,
+				tenant_id=UUID(str(_tenant_id)) if _tenant_id else None,
+				profile_id=request.profile_id,
+				status=_wiz_status,
+				tasks=build_session_tasks('informefiscal', _wiz_status),
+				started_at=_wiz_started,
+				completed_at=_wiz_completed,
+			)
 			from agente_fiscal.domain.response_builder import format_reporte_response
 
 			if data is None:
@@ -1419,6 +1841,7 @@ async def chat_message_stream(
 	"""
 	message = request.message
 	conversation_id = request.conversation_id or str(uuid.uuid4())
+	message_id = request.message_id
 	tenant_id = getattr(fastapi_request.state, 'tenant_id', None)
 	store: RedisStore | None = getattr(fastapi_request.app.state, 'store', None)
 
@@ -1553,8 +1976,10 @@ async def chat_message_stream(
 			_loop.call_soon_threadsafe(queue.put_nowait, ('agent_step', {'step': step, 'goal': goal, 'url': url, 'status': status}))
 
 		def _on_task_metrics(metrics: dict) -> None:
-			# Síncrono (corre en to_thread): solo encola; el persist async se
-			# hace en _generate_tool cuando drena el evento 'task_metrics'.
+			# Síncrono (corre en to_thread): actualiza el holder last-write y
+			# solo encola; el persist async se hace en _generate_tool cuando
+			# drena el evento 'task_metrics'.
+			_last_metrics.update(metrics)  # thread-safe last-write holder (ADR-3)
 			_loop.call_soon_threadsafe(queue.put_nowait, ('task_metrics', metrics))
 
 		async def _persist_task_metrics(metrics: dict) -> None:
@@ -1595,8 +2020,20 @@ async def chat_message_stream(
 			except Exception as exc:
 				logger.warning('No se pudo persistir la sesión de browser: %s', exc)
 
+		# Thread-safe last-write holder para métricas del provider (Browserbase):
+		# el callback corre en el hilo del to_thread; el run se lee post-dispatch.
+		_last_metrics: dict[str, Any] = {}
+
 		async def _run_tool():
 			try:
+				# ADR-3: started_at captura el dispatch ("Comenzó"); completed_at
+				# se mide al retornar → duración = round-trip del tool run.
+				# Alias local: chat_message_stream enlaza SU PROPIO 'datetime'
+				# (rama REPORTE_COMPLETO) — un closure sobre esa local no asociada
+				# crashea con 'free variable not found' si la rama no corrió.
+				from datetime import datetime as _dt_run, timezone as _tz_run
+
+				started_at = _dt_run.now(_tz_run.utc)
 				if spec.needs_browser:
 					data = await asyncio.to_thread(
 						_run_browser_tool,
@@ -1611,6 +2048,25 @@ async def chat_message_stream(
 					)
 				else:
 					data = await asyncio.to_thread(_run_engine_tool, spec, cuit, _progress)
+				completed_at = _dt_run.now(_tz_run.utc)
+				# AST-2: una fila por run, status completed|error desde el dict.
+				_run_status = 'error' if (data and data.get('error')) else 'completed'
+				_tool_key = spec.tool_key or spec.tool_name
+				# Browser: session_id real del provider (last-write holder);
+				# engine: sin sesión (NULL, AST-3). Tasks: métricas reales si el
+				# provider las dio, si no el template DEFAULT (7 para consultaarca).
+				_browser_session_id = (
+					(_last_metrics.get('session_id') or '').strip() or None
+					if spec.needs_browser
+					else None
+				)
+				_metric_tasks = _last_metrics.get('tasks') or []
+				_tasks = build_session_tasks(
+					_tool_key,
+					_run_status,
+					count=len(_metric_tasks) if _metric_tasks else None,
+				)
+				_cost = int(_last_metrics.get('cost_cents') or 0) if spec.needs_browser else 0
 				reply = _resolve_formatter(spec.formatter_name)(data, cuit)
 				safe_data = _json_safe(data)
 				if tenant_id and store is not None:
@@ -1636,6 +2092,22 @@ async def chat_message_stream(
 					],
 					profile_id=request.profile_id,
 					status='done',
+				)
+				# Telemetría agent_sessions (AST-2/3, ADR-3): persist POST-run,
+				# best-effort — la DB nunca rompe el SSE.
+				await _persist_agent_session(
+					fastapi_request,
+					tool=_tool_key,
+					message_id=message_id,
+					conversation_id=conversation_id,
+					tenant_id=UUID(str(tenant_id)) if tenant_id else None,
+					profile_id=request.profile_id,
+					status=_run_status,
+					tasks=_tasks,
+					cost_cents=_cost,
+					session_id=_browser_session_id,
+					started_at=started_at,
+					completed_at=completed_at,
 				)
 				complete_payload: dict[str, Any] = {'reply': reply, 'data': safe_data, 'conversation_id': conversation_id}
 				# Mismo canal FIFO que progress/live_url/agent_step (call_soon_threadsafe):
@@ -1678,6 +2150,13 @@ async def chat_message_stream(
 					yield f'event: complete\ndata: {json.dumps(payload)}\n\n'
 					break
 			await task
+
+		# La fila de la conversación queda en Postgres ANTES de que la tool
+		# corra (status 'running') para que el sidebar la muestre al instante;
+		# el upsert post-run (status 'done') completa la MISMA fila.
+		await _persist_conversation_start(
+			fastapi_request, conversation_id, message, request.profile_id
+		)
 
 		return StreamingResponse(
 			_generate_tool(),
@@ -1877,6 +2356,16 @@ async def chat_message(
 
 	# 1. Detect intent + extract CUIT (with history context)
 	intent, cuit, _params = detect(context)
+
+	# La fila de la conversación queda en Postgres ANTES de que la tool/pipeline
+	# corra (status 'running') para que el sidebar la muestre al instante; el
+	# upsert post-run (status 'done') completa la MISMA fila. Cubre multi-tool
+	# (request.tools) y single-intent (TAXPAYER_QUERY, REPORTE_COMPLETO,
+	# engines deterministas INTENT_TO_KEY). Los early-returns de no-CUIT y
+	# UNKNOWN ya persisten 'done' síncronamente (upsert idempotente: misma fila).
+	await _persist_conversation_start(
+		fastapi_request, conversation_id, message, request.profile_id
+	)
 
 	# 1b. Explicit multi-tool request: bypass detect() — run a consolidated pipeline.
 	if request.tools:

@@ -153,8 +153,14 @@ class MockBrowser:
 		echo_func: Optional[Callable[[str], None]] = None,
 		on_live_url: Optional[Callable[[str], None]] = None,
 		on_step: Optional[Callable[[int, str, str, str], None]] = None,
+		on_task_metrics: Optional[Callable[[dict], None]] = None,
 	) -> DeudaOutput:
-		"""Return a deterministic fixture for the client, never reaching the cloud."""
+		"""Return a deterministic fixture for the client, never reaching the cloud.
+
+		``on_task_metrics`` se acepta y se ignora (AST-5): el dispatch lo pasa
+		siempre; MockBrowser no tiene telemetría real (la fila ``agent_sessions``
+		queda con session_id NULL — ADR-7), solo evita el TypeError.
+		"""
 		cuit = cliente.cuit if cliente is not None else MOCK_FALLBACK_CUIT
 		task_names = [t.name for t in (tasks or []) if getattr(t, 'name', '')]
 		if echo_func:

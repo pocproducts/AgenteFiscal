@@ -3,6 +3,10 @@ import {
   getConversation,
   type BackendConversationMessage,
 } from "@/lib/backend/conversations";
+import {
+  listAgentSessions,
+  toAgentSessionSnapshots,
+} from "@/lib/backend/agent-sessions";
 import { BackendError } from "@/lib/backend/client";
 import { ChatbotError, type ErrorCode } from "@/lib/errors";
 import type { ChatMessage } from "@/lib/types";
@@ -66,14 +70,17 @@ export async function GET(request: Request) {
       return new ChatbotError("not_found:chat").toResponse();
     }
 
+    // Per-chat agent activity now comes from the persisted agent_sessions rows
+    // scoped to this conversation (AST-6). Hydrate consumes the snapshots and
+    // dedupes against the live-streamed session markers (use-active-chat.tsx).
+    const rows = await listAgentSessions({ conversationId: chatId });
+
     return Response.json({
       messages: conversation.messages.map(toUIMessage),
       visibility: "private",
       userId,
       isReadonly: false,
-      // Per-chat agent activity is streamed live (data-agent-session-*); the
-      // backend does not persist it on the conversation yet.
-      activity: [],
+      activity: toAgentSessionSnapshots(rows),
     });
   } catch (err) {
     const code = backendErrorToCode(err);

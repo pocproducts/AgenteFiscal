@@ -127,8 +127,24 @@ const PureChatItem = ({
   );
 };
 
+// The comparator must re-render when the chat row changes, not only when the
+// active state flips: the sidebar refetches while a chat is open and the row
+// transitions running → done and the friendly title gets PATCHed. Comparing
+// only isActive froze the item with the spinner and the old title forever.
 export const ChatItem = memo(PureChatItem, (prevProps, nextProps) => {
   if (prevProps.isActive !== nextProps.isActive) {
+    return false;
+  }
+  if (prevProps.chat.id !== nextProps.chat.id) {
+    return false;
+  }
+  if (prevProps.chat.title !== nextProps.chat.title) {
+    return false;
+  }
+  if (prevProps.chat.status !== nextProps.chat.status) {
+    return false;
+  }
+  if (prevProps.chat.visibility !== nextProps.chat.visibility) {
     return false;
   }
   return true;

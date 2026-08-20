@@ -8,7 +8,6 @@ import {
 } from "next/font/google";
 import { Suspense } from "react";
 import { ClerkLocaleProvider } from "@/components/auth/clerk-locale-provider";
-import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LanguageProvider } from "@/lib/i18n";
 import "./globals.css";
@@ -116,20 +115,13 @@ export default async function RootLayout({
         />
       </head>
       <body className="font-sans antialiased">
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          disableTransitionOnChange
-          enableSystem
-        >
-          <Suspense fallback={null}>
-            <LanguageProvider initialLocale="es">
-              <ClerkLocaleProvider>
-                <TooltipProvider>{children}</TooltipProvider>
-              </ClerkLocaleProvider>
-            </LanguageProvider>
-          </Suspense>
-        </ThemeProvider>
+        <Suspense fallback={null}>
+          <LanguageProvider initialLocale="es">
+            <ClerkLocaleProvider>
+              <TooltipProvider>{children}</TooltipProvider>
+            </ClerkLocaleProvider>
+          </LanguageProvider>
+        </Suspense>
       </body>
     </html>
   );

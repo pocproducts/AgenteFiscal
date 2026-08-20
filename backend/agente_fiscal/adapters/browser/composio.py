@@ -1051,6 +1051,7 @@ class ComposioBrowser:
 		echo_func: Optional[Callable[[str], None]] = None,
 		on_live_url: Optional[Callable[[str], None]] = None,
 		on_step: Optional[Callable[[int, str, str, str], None]] = None,
+		on_task_metrics: Optional[Callable[[dict], None]] = None,
 	) -> DeudaOutput:
 		"""Sync wrapper para _run_single. Crea su propio event loop.
 
@@ -1058,6 +1059,10 @@ class ComposioBrowser:
 		    cliente: Configuración del cliente (``cuit``, ``nombre``, etc.).
 		    tasks: Lista de BrowserTask. Si None, usa [VencimientosDeudasTask()].
 		    echo_func: Callback opcional para emitir progreso en tiempo real.
+		    on_task_metrics: Aceptado y IGNORADO (AST-5/ADR-7): Composio resuelve
+		        session_id/event_count vía telemetría de Logs/Usage APIs
+		        (``composio_telemetry.py``); la fila ``agent_sessions`` la escribe
+		        el backend post-run (ADR-3). Solo evita el TypeError del dispatch.
 
 		Returns:
 		    ``DeudaOutput`` con resultado o error. Nunca propaga excepción.

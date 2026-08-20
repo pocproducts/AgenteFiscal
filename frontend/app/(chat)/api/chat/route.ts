@@ -17,8 +17,9 @@ import {
   callBackendStream,
 } from "@/lib/backend/client";
 import {
+  buildDeleteChatResponse,
   deleteConversation,
-  saveConversation,
+  patchConversationTitle,
 } from "@/lib/backend/conversations";
 import { ChatbotError, type ErrorCode } from "@/lib/errors";
 import { tenantKey } from "@/lib/tenant";
@@ -74,6 +75,21 @@ function chunkText(text: string, maxChunk = 80): string[] {
     chunks.push(current);
   }
   return chunks;
+}
+
+// Conversation title: `Informe {cuit} — {DD/MM HH:MM}` for fiscal chats, a
+// generic fallback otherwise. Shared by the tool branch (emitted at stream
+// start so the sidebar shows it while the run is live) and the finally block
+// (non-tool chats, after the stream completes) so both use the exact same
+// format and em-dash.
+function buildChatTitle(cuit: string | null, now: Date): string {
+  const day = now.getDate().toString().padStart(2, "0");
+  const month = (now.getMonth() + 1).toString().padStart(2, "0");
+  const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+  const timestamp = `${day}/${month} ${time}`;
+  return cuit
+    ? `Informe ${cuit} — ${timestamp}`
+    : `Consulta Fiscal — ${timestamp}`;
 }
 
 // Flatten prior client messages into the backend's [{role, content}] history
@@ -225,6 +241,9 @@ export async function POST(request: Request) {
         const textPartId = generateId();
         dataStream.write({ type: "text-start", id: textPartId });
 
+        // Title sent at stream start (tool branch) → the finally block skips
+        // re-emitting/re-patching it for the same conversation.
+        let titleSent = false;
         let assistantText = "";
         try {
           // Browser tools: resolve toolKey/toolName/windowMs from the matcher
@@ -345,6 +364,34 @@ export async function POST(request: Request) {
               let buffer = "";
               let finalReply = "";
               let finalData: Record<string, unknown> | null = null;
+
+              // Conversation row now exists (backend persists it running at dispatch;
+              // once the stream connected, the dispatch persist is guaranteed done).
+              // PATCH the friendly title first (CD-2: PATCH never creates, but the row
+              // exists now), then emit data-chat-title so the sidebar revalidation this
+              // event triggers reads the saved title.
+              const titleAtStart =
+                uiMessages.length === 1 && cuit
+                  ? buildChatTitle(cuit, new Date())
+                  : null;
+              if (titleAtStart) {
+                try {
+                  const { ok } = await patchConversationTitle(id, titleAtStart);
+                  if (!ok) {
+                    console.error(
+                      "Chat title not saved: conversation missing or deleted:",
+                      id
+                    );
+                  }
+                } catch (titleErr) {
+                  console.error("Failed to save chat title:", titleErr);
+                }
+                dataStream.write({
+                  type: "data-chat-title",
+                  data: titleAtStart,
+                });
+                titleSent = true;
+              }
 
               while (true) {
                 const { done, value } = await reader.read();
@@ -527,6 +574,17 @@ export async function POST(request: Request) {
             // and their formatted reply already shows everything, so we skip
             // the raw JSON dump for them.
             const history = buildHistory(uiMessages as ClientUIMessage[]);
+            // Deterministic engines (consulta arca, calendariovencimientosarca)
+            // go through the non-stream path: emit the title immediately as a
+            // marker so the sidebar revalidates and shows the chat as soon as
+            // the backend persists it running at dispatch. The finally block
+            // still PATCHes the friendly title once the run completes.
+            if (uiMessages.length === 1 && cuit) {
+              dataStream.write({
+                type: "data-chat-title",
+                data: buildChatTitle(cuit, new Date()),
+              });
+            }
             const res = await callBackend<ChatResponse>("/v1/chat/message", {
               method: "POST",
               body: {
@@ -572,21 +630,24 @@ export async function POST(request: Request) {
           });
           dataStream.write({ type: "text-end", id: textPartId });
         } finally {
-          if (uiMessages.length === 1) {
-            const now = new Date();
-            const day = now.getDate().toString().padStart(2, "0");
-            const month = (now.getMonth() + 1).toString().padStart(2, "0");
-            const time = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
-            const timestamp = `${day}/${month} ${time}`;
-            const title = cuit
-              ? `Informe ${cuit} — ${timestamp}`
-              : `Consulta Fiscal — ${timestamp}`;
+          // Title at stream start (tool branch) already emitted + PATCHed the
+          // title — never double-patch for the same conversation. Non-tool
+          // chats (titleSent stays false) behave exactly like before.
+          if (!titleSent && uiMessages.length === 1) {
+            const title = buildChatTitle(cuit, new Date());
             dataStream.write({ type: "data-chat-title", data: title });
             // The backend persisted the conversation itself (user + assistant,
-            // status done). Only the final title is BFF-owned: upsert it so
-            // the sidebar shows the friendly title instead of the default.
+            // status done). Only the final title is BFF-owned: PATCH it so the
+            // sidebar shows the friendly title. PATCH never creates (CD-2) —
+            // a deleted chat yields `{ok:false}` and the title is not saved.
             try {
-              await saveConversation({ id, title });
+              const { ok } = await patchConversationTitle(id, title);
+              if (!ok) {
+                console.error(
+                  "Chat title not saved: conversation missing or deleted:",
+                  id
+                );
+              }
             } catch (titleErr) {
               console.error("Failed to save chat title:", titleErr);
             }
@@ -622,15 +683,15 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    await deleteConversation(chatId);
-    return Response.json({ success: true }, { status: 200 });
-  } catch (err) {
-    // The backend returns 404 both for missing chats and for chats the caller
-    // may not delete; treat it as a successful no-op so the sidebar removes
-    // the row regardless.
-    if (err instanceof BackendError && err.status === 404) {
-      return Response.json({ success: true }, { status: 200 });
+    const { deleted } = await deleteConversation(chatId);
+    if (!deleted) {
+      // CD-3 honest failure: the backend 404s missing, already-deleted, or
+      // cross-tenant chats. Never swallow it as a successful no-op — the
+      // client must keep the row and surface an error.
+      return Response.json(buildDeleteChatResponse(false), { status: 404 });
     }
+    return Response.json(buildDeleteChatResponse(true), { status: 200 });
+  } catch (err) {
     const { detail } = describeBackendError(err);
     const code =
       err instanceof BackendError ? backendErrorToCode(err) : "offline:chat";

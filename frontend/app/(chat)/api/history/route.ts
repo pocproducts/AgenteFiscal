@@ -17,7 +17,8 @@ type ChatHistory = { chats: Chat[]; hasMore: boolean };
 
 // Backend summaries are camelCase and newest-first. Map into the Chat shape the
 // sidebar groups/renders: grouping uses createdAt (driven by updatedAt so a
-// just-updated chat groups today), the spinner uses status.
+// just-updated chat groups today), the spinner uses status (running chats keep
+// the spinner until the backend flips the row to done).
 function toChat(summary: BackendConversationSummary): Chat {
   return {
     id: summary.id,
@@ -26,7 +27,7 @@ function toChat(summary: BackendConversationSummary): Chat {
     userId: "",
     tenantId: "",
     visibility: "private",
-    status: "done",
+    status: summary.status === "running" ? "running" : "done",
   };
 }
 

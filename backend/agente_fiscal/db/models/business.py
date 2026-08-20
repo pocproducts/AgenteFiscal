@@ -20,7 +20,9 @@ from sqlalchemy import (
     Numeric,
     String,
     UniqueConstraint,
+    desc,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -53,6 +55,9 @@ class Conversation(UuidPkMixin, TimestampMixin, Base):
     )
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default='running')
+    #: Tombstone (ADR-5): DELETE sets this instead of removing the row so
+    #: upserts can never resurrect an explicitly deleted conversation (CD-2).
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tenant: Mapped[Tenant] = relationship()
     user: Mapped[User | None] = relationship()
@@ -209,6 +214,67 @@ class BrowserSession(UuidPkMixin, TimestampMixin, Base):
             name='uq_browser_sessions_tenant_profile_provider',
         ),
         Index('ix_browser_sessions_tenant_profile_id', 'tenant_id', 'profile_id'),
+    )
+
+
+class AgentSession(UuidPkMixin, TimestampMixin, Base):
+    """User-facing telemetry row for ONE agent tool run (engine or browser).
+
+    Written post-execution by ``chat.py`` (ADR-3): ``_run_tool`` is the single
+    convergence point for engine + browser. Coexists with ``browser_sessions``
+    (ADR-1): this table is telemetry (Acciones/Comenzó/Duración), that one is
+    infra state (context reuse, active↔in_use).
+
+    - ``tool``: ``ToolSpec.tool_key`` (e.g. ``'consultaarca'``).
+    - ``message_id``/``conversation_id``: opaque frontend ids, NO FK.
+    - ``profile_id``: NULL for engine rows (AST-3); user-created profile for
+      browser rows (AST-4).
+    - ``session_id``: provider session id (AST-4) — engines keep NULL,
+      browserbase comes from the drained ``task_metrics``, composio from the
+      provider Logs API (ADR-7).
+    - ``tasks``: JSONB "Acciones" — 7 canonical defaults for ``consultaarca``
+      (AST-3), provider ``event_count`` generic entries for composio (ADR-7).
+    - ``cost_cents``: always 0 in this slice (AST-3/4).
+    - ``started_at``/``completed_at``: run round-trip; duration = the diff.
+    """
+
+    __tablename__ = 'agent_sessions'
+
+    tool: Mapped[str] = mapped_column(String(64), nullable=False)
+    message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey('profiles.id', ondelete='SET NULL'), nullable=True
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey('tenants.id', ondelete='CASCADE'), nullable=False
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey('users.id', ondelete='SET NULL'), nullable=True
+    )
+    session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default='completed', server_default='completed'
+    )
+    tasks: Mapped[list[dict]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    cost_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default='0')
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    tenant: Mapped[Tenant] = relationship()
+    profile: Mapped[Profile | None] = relationship()
+    user: Mapped[User | None] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'completed', 'error')",
+            name='agent_sessions_status_check',
+        ),
+        Index('ix_agent_sessions_tenant_created', 'tenant_id', desc('created_at')),
+        Index('ix_agent_sessions_conversation', 'conversation_id'),
+        Index('ix_agent_sessions_profile', 'profile_id'),
     )
 
 
