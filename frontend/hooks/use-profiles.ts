@@ -297,7 +297,12 @@ export function useProfiles() {
 
   return {
     profiles,
-    isLoading,
+    // Gate `isLoading` behind mount: during SSR and the client's first render
+    // the tenant key is absent (server) / resolves on the client, so SWR's key
+    // changes and flips `isLoading` to true only after hydration. Reporting the
+    // real value on the first client render mismatches the server's empty state
+    // (server: isLoading false → empty block; client: isLoading true → spinner).
+    isLoading: mounted ? isLoading : false,
     error,
     refetch,
     addProfile,

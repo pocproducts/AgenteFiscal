@@ -6,13 +6,13 @@ export const translations = {
   en: {
     nav: {
       links: {
-        features: "Features",
-        howItWorks: "How it works",
-        developers: "Developers",
+        features: "Processes",
+        howItWorks: "Comments",
+        developers: "Contact",
         pricing: "Pricing",
       },
       signIn: "Sign in",
-      startCreating: "Start creating",
+      startCreating: "Create Report",
       toggleMenu: "Toggle menu",
     },
     hero: {
@@ -287,14 +287,14 @@ export const translations = {
       titleLine2: "something great?",
       description:
         "Join thousands of teams shipping faster with Optimus. Start free, scale infinitely.",
-      startBuilding: "Start building free",
+      startBuilding: "Create Report",
       talkToSales: "Talk to sales",
       noCreditCard: "No credit card required",
     },
     footer: {
       description:
         "The platform for teams who ship. Build, deploy, and scale with unprecedented velocity.",
-      allRights: "2025 Optimus. All rights reserved.",
+      allRights: "2025 Agente Fiscal. All rights reserved.",
       allSystems: "All systems operational",
       hiring: "Hiring",
       columns: {
@@ -354,8 +354,8 @@ export const translations = {
         chatbot: "Chatbot",
         home: "Home",
         agents: "Agents",
-        newAgent: "New Agent",
-        agentSessions: "Agent Sessions",
+        newAgent: "New Report",
+        agentSessions: "Sessions",
         analytics: "Analytics",
         overview: "Overview",
         llmGateway: "LLM Gateway",
@@ -895,13 +895,13 @@ export const translations = {
   es: {
     nav: {
       links: {
-        features: "Funciones",
-        howItWorks: "Cómo funciona",
-        developers: "Desarrolladores",
+        features: "Procesos",
+        howItWorks: "Comentarios",
+        developers: "Contacto",
         pricing: "Precios",
       },
       signIn: "Iniciar sesión",
-      startCreating: "Empezar a crear",
+      startCreating: "Crear Informe",
       toggleMenu: "Abrir menú",
     },
     hero: {
@@ -1178,14 +1178,14 @@ export const translations = {
       titleLine2: "algo increíble?",
       description:
         "Únete a miles de equipos que lanzan más rápido con Optimus. Empieza gratis, escala sin límites.",
-      startBuilding: "Construir gratis",
+      startBuilding: "Crear Informe",
       talkToSales: "Hablar con ventas",
       noCreditCard: "No se requiere tarjeta de crédito",
     },
     footer: {
       description:
         "La plataforma para equipos que lanzan. Crea, despliega y escala con una velocidad sin precedentes.",
-      allRights: "2025 Optimus. Todos los derechos reservados.",
+      allRights: "2025 Agente Fiscal. Todos los derechos reservados.",
       allSystems: "Todos los sistemas operativos",
       hiring: "Contratando",
       columns: {
@@ -1245,8 +1245,8 @@ export const translations = {
         chatbot: "Chatbot",
         home: "Inicio",
         agents: "Agentes",
-        newAgent: "Nuevo Agente",
-        agentSessions: "Sesiones de agentes",
+        newAgent: "Nuevo Informe",
+        agentSessions: "Sesiones",
         analytics: "Analítica",
         overview: "Resumen",
         llmGateway: "LLM Gateway",

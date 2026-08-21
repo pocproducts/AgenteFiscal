@@ -13,8 +13,8 @@ export function Navigation() {
   const navLinks = [
     { name: t.nav.links.features, href: "#features" },
     { name: t.nav.links.howItWorks, href: "#how-it-works" },
-    { name: t.nav.links.developers, href: "#developers" },
     { name: t.nav.links.pricing, href: "#pricing" },
+    { name: t.nav.links.developers, href: "#cta" },
   ];
 
   useEffect(() => {

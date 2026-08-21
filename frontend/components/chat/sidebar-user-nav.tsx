@@ -3,7 +3,6 @@
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
 import { ChevronUp } from "lucide-react";
-import { useTheme } from "next-themes";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +32,6 @@ export function SidebarUserNav({ user }: { user: PanelUser }) {
   const { t } = useLanguage();
   const { isLoaded, user: clerkUser } = useUser();
   const { signOut } = useClerk();
-  const { setTheme, resolvedTheme } = useTheme();
   const menu = t.panel.sidebar.userMenu;
   const [mounted, setMounted] = useState(false);
 
@@ -84,18 +82,6 @@ export function SidebarUserNav({ user }: { user: PanelUser }) {
             data-testid="user-nav-menu"
             side="top"
           >
-            <DropdownMenuItem
-              className="cursor-pointer text-[13px]"
-              data-testid="user-nav-item-theme"
-              onSelect={() =>
-                setTheme(resolvedTheme === "dark" ? "light" : "dark")
-              }
-            >
-              {resolvedTheme === "light"
-                ? menu.toggleDarkMode
-                : menu.toggleLightMode}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
             <DropdownMenuItem asChild data-testid="user-nav-item-auth">
               <button
                 className="w-full cursor-pointer text-[13px]"

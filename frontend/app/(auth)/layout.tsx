@@ -2,7 +2,7 @@ import { ArrowLeftIcon } from "lucide-react";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { Suspense } from "react";
-import { SparklesIcon, VercelIcon } from "@/components/chat/icons";
+import { SparklesIcon } from "@/components/chat/icons";
 import { Preview } from "@/components/chat/preview";
 import type { Language } from "@/lib/i18n";
 import { getDictionary } from "@/lib/i18n/server";
@@ -46,11 +46,6 @@ async function AuthLayoutContent({ children }: { children: React.ReactNode }) {
       </div>
 
       <div className="hidden flex-1 flex-col overflow-hidden pl-12 xl:flex">
-        <div className="flex items-center gap-1.5 pt-8 text-[13px] text-muted-foreground/50">
-          {t.auth.poweredBy}
-          <VercelIcon size={14} />
-          <span className="font-medium text-muted-foreground">AI Gateway</span>
-        </div>
         <div className="flex-1 pt-4">
           <Preview />
         </div>

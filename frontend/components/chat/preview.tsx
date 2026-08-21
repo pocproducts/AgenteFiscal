@@ -1,13 +1,24 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useLanguage } from "@/lib/i18n";
-import { SparklesIcon } from "./icons";
+
+type LoginCard = {
+  title: string;
+  isNew?: boolean;
+  action?: string;
+};
+
+const loginCards: LoginCard[] = [
+  { title: "Consulta directa con ARCA" },
+  { title: "Automatizacion directa en Mis Faculidades" },
+  { title: "Obtencion de datalles en Sistema Registral" },
+  { title: "Informacion sobre Deudas y Vecimientos" },
+  { title: "Ver informe completo", isNew: true, action: "informefiscal" },
+  { title: "Enviar mail", isNew: true, action: "enviarmail" },
+];
 
 export function Preview() {
   const router = useRouter();
-  const { t } = useLanguage();
-  const suggestions = t.panel.chat.suggestions;
 
   const handleAction = (query?: string) => {
     const url = query ? `/?query=${encodeURIComponent(query)}` : "/";
@@ -16,13 +27,6 @@ export function Preview() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-tl-2xl bg-background">
-      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-border/20 px-5">
-        <div className="flex size-5 items-center justify-center rounded bg-muted/60 ring-1 ring-border/50">
-          <SparklesIcon size={10} />
-        </div>
-        <span className="text-[13px] text-muted-foreground">Chatbot</span>
-      </div>
-
       <div className="flex flex-1 flex-col items-center justify-center gap-8 px-8">
         <div className="text-center">
           <h2 className="text-xl font-semibold tracking-tight">
@@ -38,27 +42,32 @@ export function Preview() {
           className="grid w-full max-w-md grid-cols-2 gap-2"
           data-testid="suggested-actions"
         >
-          {suggestions.map((suggestion) => (
-            <button
-              className="rounded-xl border border-border/30 bg-card/20 px-3 py-2.5 text-left text-[11px] leading-relaxed text-muted-foreground/70 transition-all duration-200 hover:border-border/60 hover:bg-card/40 hover:text-muted-foreground"
-              key={suggestion}
-              onClick={() => handleAction(suggestion)}
-              type="button"
-            >
-              {suggestion}
-            </button>
-          ))}
+          {loginCards.map((card) => {
+            const readOnly = !card.action;
+            return (
+              <button
+                key={card.title}
+                type="button"
+                disabled={readOnly}
+                onClick={readOnly ? undefined : () => handleAction(card.action)}
+                className={[
+                  "relative rounded-xl border border-border/30 bg-card/20 px-3 py-2.5 text-left text-[11px] leading-relaxed text-muted-foreground/70 transition-all duration-200",
+                  readOnly
+                    ? "cursor-default"
+                    : "hover:border-border/60 hover:bg-card/40 hover:text-muted-foreground",
+                  card.isNew ? "ring-1 ring-primary/40" : "",
+                ].join(" ")}
+              >
+                {card.title}
+                {card.isNew ? (
+                  <span className="absolute -right-1.5 -top-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-primary-foreground">
+                    nuevo
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
-      </div>
-
-      <div className="shrink-0 px-5 pb-5">
-        <button
-          className="flex w-full items-center rounded-2xl border border-border/30 bg-card/30 px-4 py-3 text-left text-[13px] text-muted-foreground/40 transition-colors hover:border-border/50 hover:text-muted-foreground/60"
-          onClick={() => handleAction()}
-          type="button"
-        >
-          N° de CUIT...
-        </button>
       </div>
     </div>
   );

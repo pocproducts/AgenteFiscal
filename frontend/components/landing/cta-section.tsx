@@ -38,6 +38,7 @@ export function CtaSection() {
 
   return (
     <section
+      id="cta"
       className="relative py-24 lg:py-32 overflow-hidden"
       ref={sectionRef}
     >

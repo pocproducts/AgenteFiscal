@@ -1,6 +1,5 @@
 "use client";
 
-import { ArrowUpRight } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 import { AnimatedWave } from "./animated-wave";
 
@@ -12,15 +11,6 @@ const footerColumns = [
       { labelKey: "howItWorks", href: "#how-it-works" },
       { labelKey: "pricing", href: "#pricing" },
       { labelKey: "integrations", href: "#integrations" },
-    ],
-  },
-  {
-    key: "Developers" as const,
-    links: [
-      { labelKey: "documentation", href: "#developers" },
-      { labelKey: "apiReference", href: "#" },
-      { labelKey: "sdk", href: "#developers" },
-      { labelKey: "status", href: "#" },
     ],
   },
   {
@@ -42,12 +32,6 @@ const footerColumns = [
   },
 ] as const;
 
-const socialLinks = [
-  { name: "Twitter", href: "#" },
-  { name: "GitHub", href: "#" },
-  { name: "LinkedIn", href: "#" },
-];
-
 export function FooterSection() {
   const { t } = useLanguage();
 
@@ -65,7 +49,7 @@ export function FooterSection() {
             {/* Brand Column */}
             <div className="col-span-2">
               <a className="inline-flex items-center gap-2 mb-6" href="/">
-                <span className="text-2xl font-display">Optimus</span>
+                <span className="text-2xl font-display">Agente Fiscal</span>
                 <span className="text-xs text-muted-foreground font-mono">
                   TM
                 </span>
@@ -74,20 +58,6 @@ export function FooterSection() {
               <p className="text-muted-foreground leading-relaxed mb-8 max-w-xs">
                 {t.footer.description}
               </p>
-
-              {/* Social Links */}
-              <div className="flex gap-6">
-                {socialLinks.map((link) => (
-                  <a
-                    className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1 group"
-                    href={link.href}
-                    key={link.name}
-                  >
-                    {link.name}
-                    <ArrowUpRight className="w-3 h-3 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all" />
-                  </a>
-                ))}
-              </div>
             </div>
 
             {/* Link Columns */}
