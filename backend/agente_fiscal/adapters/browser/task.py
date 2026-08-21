@@ -16,7 +16,7 @@ from agente_fiscal.adapters.tasks.base import BaseTask, TaskResult
 from typing import Any, Optional
 
 from agente_fiscal.adapters.browser.iibb_router import IIBBRouter
-from agente_fiscal.adapters.browser.workflows import TEMPLATE_FACILIDADES, TEMPLATE_FULL, TEMPLATE_LOGIN, TEMPLATE_REGISTRO
+from agente_fiscal.adapters.browser.workflows import TEMPLATE_FACILIDADES, TEMPLATE_LOGIN, TEMPLATE_REGISTRO, TEMPLATE_VENCIMIENTOSDEUDAS
 
 logger = logging.getLogger(__name__)
 
@@ -167,12 +167,12 @@ class BrowserTask(BaseTask):
 class VencimientosDeudasTask(BrowserTask):
 	"""Vencimientos + deudas: login + switch representado + extract deuda.
 
-	Combined task for backward compatibility — same as the original
-	single-task _run_single() pipeline. Antes llamado ``FullTask``.
+	Atomic deuda/vencimientos extraction. The old monolithic "FullTask"
+	was consolidated into this single-purpose task.
 	"""
 
-	name = 'full'
-	template = TEMPLATE_FULL
+	name = 'vencimientos'
+	template = TEMPLATE_VENCIMIENTOSDEUDAS
 	needs_auth = True
 	timeout = 600
 
@@ -228,7 +228,7 @@ class ExtractV2Task(BrowserTask):
 	"""
 
 	name = 'extract_v2'
-	template = TEMPLATE_FULL
+	template = TEMPLATE_VENCIMIENTOSDEUDAS
 	needs_auth = False
 	timeout = 600
 

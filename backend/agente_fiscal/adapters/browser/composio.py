@@ -27,7 +27,7 @@ from typing import Any, Callable, Optional
 
 import requests
 
-from agente_fiscal.adapters.browser.workflows import TEMPLATE_FULL
+from agente_fiscal.adapters.browser.workflows import TEMPLATE_VENCIMIENTOSDEUDAS
 from agente_fiscal.domain.models import (
 	ClientConfig,
 	DeudaDetail,

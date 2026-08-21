@@ -8,18 +8,9 @@ Placeholders: ``{cuit}``, ``{clave}``, ``{cliente_cuit}``
 
 from __future__ import annotations
 
-TEMPLATE_REGISTRO: str = """Registro Tributario — Extraer datos del RUT
+from agente_fiscal.adapters.browser.workflows._login_fragment import LOGIN_STEPS
 
---- PARTE 1: LOGIN ---
-
-1. Abrí https://auth.afip.gob.ar/contribuyente_/login.xhtml
-2. Ingresá CUIT: {cuit}
-3. Click 'Siguiente'. Esperá campo contraseña.
-4. Ingresá clave: {clave}
-5. Click 'Ingresar'. Esperá redirección a URL con 'cloud.afip.gob.ar'.
-
-SI VES: 'CUIT incorrecto', 'clave inválida' → reportá ERROR ARCA-4 y detené.
-SI VES: 'código de verificación', '2FA' → reportá ERROR ARCA-6 y detené.
+TEMPLATE_REGISTRO: str = LOGIN_STEPS + """
 
 --- PARTE 2: NAVEGAR A SISTEMA REGISTRAL ---
 
@@ -56,32 +47,32 @@ SI VES: 'código de verificación', '2FA' → reportá ERROR ARCA-6 y detené.
 
 14. Armá este JSON exacto con los datos extraídos:
 
-{{
+{
   "domicilios": [
-    {{"tipo": "Fiscal", "provincia": "CABA", "localidad": "CABA", "direccion": "Av. Ejemplo 123", "codigo_postal": "1000"}}
+    {"tipo": "Fiscal", "provincia": "CABA", "localidad": "CABA", "direccion": "Av. Ejemplo 123", "codigo_postal": "1000"}
   ],
   "jurisdiccion": "CABA",
   "actividades": [
-    {{"actividad": "Comercio", "codigo": "123456", "estado": "Activo"}}
+    {"actividad": "Comercio", "codigo": "123456", "estado": "Activo"}
   ],
   "impuestos": [
-    {{"impuesto": "IVA", "categoria": "Responsable Inscripto", "estado": "Activo"}}
+    {"impuesto": "IVA", "categoria": "Responsable Inscripto", "estado": "Activo"}
   ],
   "puntos_de_venta": [
-    {{"punto": "0001", "tipo": "Emitir", "estado": "Activo"}}
+    {"punto": "0001", "tipo": "Emitir", "estado": "Activo"}
   ],
   "iibb_jurisdicciones": [
-    {{"provincia": "CABA", "inscripcion": "901-123456-7", "estado": "Activo", "fecha_alta": "2020-01-01", "fecha_baja": null}},
-    {{"provincia": "Córdoba", "inscripcion": "123-456789-0", "estado": "Activo", "fecha_alta": "2019-06-15", "fecha_baja": null}}
+    {"provincia": "CABA", "inscripcion": "901-123456-7", "estado": "Activo", "fecha_alta": "2020-01-01", "fecha_baja": null},
+    {"provincia": "Córdoba", "inscripcion": "123-456789-0", "estado": "Activo", "fecha_alta": "2019-06-15", "fecha_baja": null}
   ]
-}}
+}
 
 --- FINAL ---
 
 15. Llamá al comando `done` con el JSON en el campo `text`.
 
 Ejemplo:
-done({{"text": "{{\\"domicilios\\": [], \\"jurisdiccion\\": null, \\"actividades\\": [], \\"impuestos\\": [], \\"puntos_de_venta\\": [], \\"iibb_jurisdicciones\\": []}}", "success": true}})
+done({"text": "{\\"domicilios\\": [], \\"jurisdiccion\\": null, \\"actividades\\": [], \\"impuestos\\": [], \\"puntos_de_venta\\": [], \\"iibb_jurisdicciones\\": []}", "success": true})
 
 Si una sección no tiene datos, dejá el array vacío.
 NO pongas texto adicional fuera del JSON.

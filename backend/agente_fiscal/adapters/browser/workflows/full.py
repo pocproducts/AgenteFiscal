@@ -1,28 +1,13 @@
-"""Pipeline completo — instrucción NL para Composio Browser Tool.
+"""Deuda y vencimientos — instrucción NL para Composio Browser Tool.
 
 Placeholders: ``{cuit}``, ``{clave}``, ``{cliente_cuit}``
 """
 
 from __future__ import annotations
 
-TEMPLATE_FULL: str = """Sistema de Cuentas Tributarias — Extraer deuda y vencimientos
+from agente_fiscal.adapters.browser.workflows._login_fragment import LOGIN_STEPS
 
-PARTE 1 — LOGIN EN ARCA
-
-1. Abrí la URL:
-   https://auth.afip.gob.ar
-2. Esperá a que cargue completamente (máx 10s).
-3. En el campo "CUIT" ingresá: {cuit}
-4. Click en "Siguiente".
-5. Esperá que aparezca el campo de contraseña (máx 5s).
-6. En el campo de contraseña ingresá: {clave}
-7. Click en "Ingresar".
-8. Esperá redirección a una URL que contenga "cloud.afip.gob.ar" (máx 15s).
-
-ERRORES — Detené la tarea y reportá:
-  ERROR ARCA-4 si ves 'CUIT incorrecto', 'clave inválida' o similar
-  ERROR ARCA-6 si ves 'código de verificación', '2FA', 'token'
-  ERROR ARCA-1 si después de reintentar no redirige al cloud
+TEMPLATE_VENCIMIENTOSDEUDAS: str = LOGIN_STEPS + """
 
 PARTE 2 — CAMBIAR AL CONTRIBUYENTE REPRESENTADO
 

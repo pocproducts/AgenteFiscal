@@ -26,9 +26,6 @@ from agente_fiscal.adapters.browser.task import (
 	VencimientosDeudasTask,
 )
 
-# Backward compatibility alias
-FullTask = VencimientosDeudasTask
-
 __all__ = [
 	'build_browser_tasks',
 	'build_browser_provider',
@@ -36,7 +33,6 @@ __all__ = [
 	'ComposioBrowser',
 	'BrowserTask',
 	'FacilidadesTask',
-	'FullTask',  # alias backward-compatible
 	'IIBBTask',
 	'LoginTask',
 	'MockBrowser',

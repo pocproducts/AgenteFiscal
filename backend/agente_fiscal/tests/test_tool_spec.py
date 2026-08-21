@@ -19,6 +19,7 @@ TOOL_KEYS = [
 	'deudavencimientos',
 	'misfacilidades',
 	'rentascordoba',
+	'reportecompleto',
 	'consultaarca',
 	'calendariovencimientosarca',
 ]
@@ -28,6 +29,7 @@ FORMATTER_NAMES = {
 	'format_deuda_response',
 	'format_facilidades_response',
 	'format_rentas_response',
+	'format_reporte_response',
 	'format_consultaarca_response',
 	'format_calendario_response',
 }
@@ -37,6 +39,7 @@ TOOL_INTENTS = {
 	Intent.DEUDA_VENCIMIENTOS,
 	Intent.MIS_FACILIDADES,
 	Intent.RENTAS_CORDOBA,
+	Intent.REPORTE_COMPLETO,
 	Intent.CONSULTA_ARCA,
 	Intent.CALENDARIO_VENCIMIENTOS_ARCA,
 }
@@ -87,6 +90,7 @@ def test_intent_to_key_bijection():
 		('deudavencimientos', {'with_deuda': True}),
 		('misfacilidades', {'with_facilidades': True}),
 		('rentascordoba', {'with_iibb': True, 'provincia': 'CORDOBA'}),
+		('reportecompleto', {'with_deuda': True, 'with_facilidades': True, 'with_registro': True, 'with_iibb': True}),
 		('consultaarca', {}),
 		('calendariovencimientosarca', {}),
 	],
@@ -102,12 +106,29 @@ def test_task_flags_per_tool(key, expected_flags):
 		('deudavencimientos', True),
 		('misfacilidades', True),
 		('rentascordoba', True),
+		('reportecompleto', True),
 		('consultaarca', False),
 		('calendariovencimientosarca', False),
 	],
 )
 def test_needs_browser_flag(key, needs_browser):
 	assert TOOL_SPECS[key].needs_browser is needs_browser
+
+
+@pytest.mark.parametrize(
+	('key', 'is_pipeline'),
+	[
+		('reportecompleto', True),
+		('sistemaregistral', False),
+		('deudavencimientos', False),
+		('misfacilidades', False),
+		('rentascordoba', False),
+		('consultaarca', False),
+		('calendariovencimientosarca', False),
+	],
+)
+def test_is_pipeline_flag(key, is_pipeline):
+	assert TOOL_SPECS[key].is_pipeline is is_pipeline
 
 
 def test_keyword_sets_are_disjoint():
@@ -123,4 +144,4 @@ def test_formatter_names_are_known():
 	"""Cada formatter_name del registro pertenece al set de formatters del dispatch."""
 	names = {spec.formatter_name for spec in TOOL_SPECS.values()}
 	assert names == FORMATTER_NAMES
-	assert len(names) == 6  # un formatter por tool, sin duplicados
+	assert len(names) == 7  # un formatter por tool, sin duplicados

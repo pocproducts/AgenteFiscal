@@ -9,22 +9,9 @@ Placeholders: ``{cuit}``, ``{clave}``, ``{cliente_cuit}``
 
 from __future__ import annotations
 
-TEMPLATE_FACILIDADES: str = """Mis Facilidades — Extraer planes de pago con detalle de cuotas y datos del plan
+from agente_fiscal.adapters.browser.workflows._login_fragment import LOGIN_STEPS
 
-PARTE 1 — LOGIN EN ARCA
-
-1. Navegá a https://auth.afip.gob.ar/contribuyente_/login.xhtml
-2. Esperá que cargue completamente la página de login.
-3. En el campo 'CUIT' ingresá: {cuit}
-4. Hacé clic en 'Siguiente'
-5. Esperá que aparezca el campo de contraseña (máx. 5 segundos).
-6. Ingresá clave fiscal: {clave}
-7. Hacé clic en 'Ingresar'
-8. Esperá la redirección al portal cloud de AFIP (URL que contenga 'cloud.afip.gob.ar').
-
-ERRORES — Detené la tarea y reportá:
-  ERROR ARCA-4 si ves 'CUIT incorrecto', 'clave inválida' o similar
-  ERROR ARCA-6 si ves 'código de verificación', '2FA', 'token'
+TEMPLATE_FACILIDADES: str = LOGIN_STEPS + """
 
 PARTE 2 — SALIR DEL PORTAL CLOUD E IR A MIS FACILIDADES
 
@@ -133,7 +120,7 @@ RESULTADO FINAL — FORMATO DEL JSON
     Los strings van entre comillas dobles, los números sin comillas.
     ``null`` cuando no hay valor.
 
-    {{
+    {
       "plan": "<nombre o identificador del plan>",
       "nro_plan": "<número de plan>",
       "estado": "VIGENTE" | "CADUCO",
@@ -145,14 +132,14 @@ RESULTADO FINAL — FORMATO DEL JSON
       "concepto": "<impuesto/s al que aplica>",
 
       "proximo_vencimiento": null
-        o {{
+        o {
           "nro_cuota": <número>,
           "fecha": "<YYYY-MM-DD>",
           "total": <número>
-        }},
+        },
 
       "cuotas": [
-        {{
+        {
           "numero": <número>,
           "capital": <número>,
           "interes_financiero": <número>,
@@ -161,17 +148,17 @@ RESULTADO FINAL — FORMATO DEL JSON
           "vencimiento": "<YYYY-MM-DD>",
           "fecha_pago": "<YYYY-MM-DD>" o null,
           "estado": "PAGA" | "IMPARA" | "DEBITADA"
-        }}
+        }
       ],
 
-      "datos_plan": {{
+      "datos_plan": {
         "fecha_consolidacion": "<YYYY-MM-DD>",
         "cbu": "<CBU>",
         "titular_cbu": "<nombre del titular>"
-      }},
+      },
 
       "observacion": "<frase lista para email>"
-    }}
+    }
 
     IMPORTANTE — La "observacion" debe ser una frase en lenguaje natural
     lista para usar directamente en un email. Por ejemplo:
@@ -189,7 +176,7 @@ Cuando llames al comando `done`, el campo `text` DEBE contener ÚNICAMENTE el JS
 No pongas resúmenes ni explicaciones. El sistema SOLO procesa el JSON que está en `text`.
 
 Ejemplo de cómo llamar a `done`:
-done({{"text": "{{\\"planes\\": []}}", "success": true}})
+done({"text": "{\\"planes\\": []}", "success": true})
 
 Si no hay planes: "planes": []
 """

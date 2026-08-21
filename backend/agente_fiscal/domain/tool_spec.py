@@ -1,11 +1,11 @@
 """Registro declarativo de tools de browser (ToolSpec).
 
-Fuente única del dispatch declarativo para las 6 tools fiscales de browser
+Fuente única del dispatch declarativo para las 7 tools fiscales de browser
 (4 Phase-1 con ComposioBrowser + 2 Phase-2 deterministas por motor):
 
 - ``ToolSpec``: dataclass frozen con la identidad, keywords, flags de tarea,
   formatter y si requiere (o no) sesión de browser viva.
-- ``TOOL_SPECS``: mapa ``tool_key → ToolSpec`` (6 filas).
+- ``TOOL_SPECS``: mapa ``tool_key → ToolSpec`` (7 filas).
 - ``INTENT_TO_KEY``: biyección ``Intent → tool_key`` (solo tool intents).
 
 Los consumidores son el intent router, el dispatch de ``api/routes/chat.py``
@@ -45,6 +45,7 @@ class ToolSpec:
 	task_flags: dict[str, Any] = field(default_factory=dict)
 	formatter_name: str = ''
 	needs_browser: bool = True
+	is_pipeline: bool = False
 	tool_name: str = ''
 
 
@@ -84,6 +85,16 @@ TOOL_SPECS: dict[str, ToolSpec] = {
 		formatter_name='format_rentas_response',
 		needs_browser=True,
 		tool_name='RentasCordoba',
+	),
+	'reportecompleto': ToolSpec(
+		tool_key='reportecompleto',
+		intent=Intent.REPORTE_COMPLETO,
+		keywords=('reporte', 'informe', 'completo', 'todo', 'resumen', 'pipeline'),
+		task_flags={'with_deuda': True, 'with_facilidades': True, 'with_registro': True, 'with_iibb': True},
+		formatter_name='format_reporte_response',
+		needs_browser=True,
+		is_pipeline=True,
+		tool_name='ReporteCompleto',
 	),
 	'consultaarca': ToolSpec(
 		tool_key='consultaarca',

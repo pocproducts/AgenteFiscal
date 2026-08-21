@@ -7,18 +7,9 @@ Placeholders: ``{cuit}``, ``{clave}``, ``{cliente_cuit}``
 
 from __future__ import annotations
 
-TEMPLATE_IIBB_CORDOBA: str = """IIBB Jurisdicciones — Extraer IIBB de Rentas Córdoba
+from agente_fiscal.adapters.browser.workflows._login_fragment import LOGIN_STEPS
 
---- PARTE 1: LOGIN ---
-
-1. Abrí https://auth.afip.gob.ar/contribuyente_/login.xhtml
-2. Ingresá CUIT: {cuit}
-3. Click 'Siguiente'. Esperá campo contraseña.
-4. Ingresá clave: {clave}
-5. Click 'Ingresar'. Esperá redirección a URL con 'cloud.afip.gob.ar'.
-
-SI VES: 'CUIT incorrecto', 'clave inválida' → reportá ERROR ARCA-4 y detené.
-SI VES: 'código de verificación', '2FA' → reportá ERROR ARCA-6 y detené.
+TEMPLATE_IIBB_CORDOBA: str = LOGIN_STEPS + """
 
 --- PARTE 2: NAVEGAR A DGR Provincia de Córdoba---
 
@@ -72,18 +63,18 @@ SI VES: 'código de verificación', '2FA' → reportá ERROR ARCA-6 y detené.
 
 Armá este JSON exacto con los datos extraídos:
 
-{{
+{
   "iibb_jurisdicciones": [
-    {{
+    {
       "provincia": "<nombre>",
       "inscripcion": "<número>",
       "estado": "<estado>",
       "fecha_alta": "<YYYY-MM-DD o null>",
       "fecha_baja": "<YYYY-MM-DD o null>"
-    }}
+    }
   ],
   "cuotas_vencidas": [
-    {{
+    {
       "periodo": "2026/3",
       "impuesto": "Ingresos Brutos Local - Régimen Mensual",
       "vencimiento": "2026-04-16",
@@ -91,15 +82,15 @@ Armá este JSON exacto con los datos extraídos:
       "recargo": null,
       "estado": "EN MORA",
       "apto_plan": false
-    }}
+    }
   ]
-}}
+}
 --- FINAL ---
 
 19. Llamá al comando `done` con el JSON en el campo `text`.
 
 Ejemplo:
-done({{"text": "{{\\"iibb_jurisdicciones\\": [], \\"cuotas_vencidas\\": []}}", "success": true}})
+done({"text": "{\\"iibb_jurisdicciones\\": [], \\"cuotas_vencidas\\": []}", "success": true})
 
 Si no hay datos de IIBB, devolvé el array vacío y el mensaje "DGR Pronviancia de Cortdoba no hay deudas y se encuentra al dia".
 NO pongas texto adicional fuera del JSON.

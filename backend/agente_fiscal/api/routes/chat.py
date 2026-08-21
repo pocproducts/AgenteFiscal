@@ -493,6 +493,7 @@ def _handle_reporte(cuit: str) -> dict[str, Any] | None:
 			with_deuda=with_browser,
 			with_facilidades=with_browser,
 			with_registro=with_browser,
+			with_iibb=with_browser,
 			send_email=False,
 			config=None,
 			memory_client=memory,
@@ -673,7 +674,10 @@ def _handle_tool_data(
 	cuit: str,
 	echo_func: Optional[Callable[[str], None]] = None,
 ) -> dict[str, Any] | None:
-	"""Dispatch no-streaming de una tool: browser o motor según el ToolSpec."""
+	"""Dispatch no-streaming de una tool: pipeline, browser o motor según el ToolSpec."""
+	if spec.is_pipeline:
+		# Reporte completo: orquestación de todas las extracciones + PDF (PipelineService).
+		return _handle_reporte(cuit)
 	if spec.needs_browser:
 		return _run_browser_tool(spec, cuit, echo_func=echo_func)
 	return _run_engine_tool(spec, cuit, echo_func=echo_func)
@@ -732,13 +736,14 @@ def format_registro_response(data: dict[str, Any] | None, cuit: str) -> str:
 
 # ── Resolver de formatters por ToolSpec ─────────────────────────────────────
 # ``format_registro_response`` vive en este módulo (chat.py, design: reusarlo
-# vía ``formatter_name``); los 5 restantes en domain/response_builder.py.
+# vía ``formatter_name``); los 6 restantes en domain/response_builder.py.
 
 _FORMATTERS: dict[str, Callable[[dict[str, Any] | None, str], str]] = {
 	'format_registro_response': format_registro_response,
 	'format_deuda_response': format_deuda_response,
 	'format_facilidades_response': format_facilidades_response,
 	'format_rentas_response': format_rentas_response,
+	'format_reporte_response': format_reporte_response,
 	'format_consultaarca_response': format_consultaarca_response,
 	'format_calendario_response': format_calendario_response,
 }
@@ -824,6 +829,7 @@ def _handle_reporte_with_echo(
 			with_deuda=with_browser,
 			with_facilidades=with_browser,
 			with_registro=with_browser,
+			with_iibb=with_browser,
 			send_email=False,
 			config=None,
 			memory_client=memory,

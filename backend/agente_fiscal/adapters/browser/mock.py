@@ -123,7 +123,7 @@ def _iibb(cuit: str) -> DeudaOutput:
 
 #: BrowserTask.name → fixture builder. Anything unseen falls back to deuda.
 _FIXTURES: dict[str, Callable[[str], DeudaOutput]] = {
-	'full': _generic_deuda,  # VencimientosDeudasTask
+	'vencimientos': _generic_deuda,  # VencimientosDeudasTask
 	'facilidades': _facilidades,
 	'registro': _registro,
 	'iibb': _iibb,

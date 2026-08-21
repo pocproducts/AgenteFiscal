@@ -8,10 +8,10 @@ Separados por etapa del pipeline ARCA:
     - iibb/: jurisdicciones IIBB desde el RUT (por provincia)
 """
 
-from agente_fiscal.adapters.browser.workflows.extract import TEMPLATE_EXTRACT
+from agente_fiscal.adapters.browser.workflows._login_fragment import LOGIN_STEPS
 from agente_fiscal.adapters.browser.workflows.facilidades import TEMPLATE_FACILIDADES
-from agente_fiscal.adapters.browser.workflows.full import TEMPLATE_FULL
-from agente_fiscal.adapters.browser.workflows.iibb import TEMPLATE_IIBB_CORDOBA, TEMPLATE_IIBB_JUJUY
+from agente_fiscal.adapters.browser.workflows.full import TEMPLATE_VENCIMIENTOSDEUDAS
+from agente_fiscal.adapters.browser.workflows.iibb import TEMPLATE_IIBB_CORDOBA
 from agente_fiscal.adapters.browser.workflows.login import TEMPLATE_LOGIN
 from agente_fiscal.adapters.browser.workflows.registro import TEMPLATE_REGISTRO
 
@@ -20,12 +20,11 @@ from agente_fiscal.adapters.browser.workflows.registro import TEMPLATE_REGISTRO
 TEMPLATE_IIBB = TEMPLATE_IIBB_CORDOBA
 
 __all__ = [
-	'TEMPLATE_EXTRACT',
+	'LOGIN_STEPS',
 	'TEMPLATE_FACILIDADES',
-	'TEMPLATE_FULL',
+	'TEMPLATE_VENCIMIENTOSDEUDAS',
 	'TEMPLATE_IIBB',
 	'TEMPLATE_IIBB_CORDOBA',
-	'TEMPLATE_IIBB_JUJUY',
 	'TEMPLATE_LOGIN',
 	'TEMPLATE_REGISTRO',
 ]

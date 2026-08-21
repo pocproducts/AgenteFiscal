@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import ClassVar
 
 from agente_fiscal.adapters.browser.workflows.iibb.cordoba import TEMPLATE_IIBB_CORDOBA
-from agente_fiscal.adapters.browser.workflows.iibb.jujuy import TEMPLATE_IIBB_JUJUY
 
 
 class IIBBRouter:
@@ -24,8 +23,6 @@ class IIBBRouter:
 
 	_templates: ClassVar[dict[str, str]] = {
 		'CORDOBA': TEMPLATE_IIBB_CORDOBA,
-		# JUJUY: inhabilitado hasta tener el template real del portal DGR Jujuy
-		# 'JUJUY': TEMPLATE_IIBB_JUJUY,
 	}
 
 	@classmethod
